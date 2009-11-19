@@ -10,7 +10,7 @@
 #define	OPM_ARRATE		 399128L
 #define	OPM_DRRATE		5514396L
 
-#define	EG_STEP	(96.0 / EVC_ENT)					// dB step
+#define	EG_STEP	(96.0 / EVC_ENT)					// dB step … (96.0[dB] / 0x0200)
 #define	SC(db)	(SINT32)((db) * ((3.0 / EG_STEP) * (1 << ENV_BITS))) + EC_DECAY
 #define	D2(v)	(((double)(6 << KF_BITS) * log((double)(v)) / log(2.0)) + 0.5)
 #define	FMASMSHIFT	(32 - 6 - (OPM_OUTSB + 1 + FMDIV_BITS) + FMVOL_SFTBIT)
@@ -110,12 +110,12 @@ void opngen_initialize(UINT rate) {
 		opncfg.sintable[i] = (long)pom;
 #endif
 	}
-	for (i=0; i<EVC_ENT; i++) {
+	for (i=0; i<EVC_ENT; i++) {				// 0x0000 ～ 0x01FF
 		pom = pow(((double)(EVC_ENT-1-i)/EVC_ENT), 8) * EVC_ENT;
-		opncfg.envcurve[i] = (long)pom;
-		opncfg.envcurve[EVC_ENT + i] = i;
+		opncfg.envcurve[i] = (long)pom;								// 0x0000～0x01FF : ((511-i/512)^8) * 512
+		opncfg.envcurve[EVC_ENT + i] = i;							// 0x0200～0x03FF : i
 	}
-	opncfg.envcurve[EVC_ENT*2] = EVC_ENT;
+	opncfg.envcurve[EVC_ENT*2] = EVC_ENT;							// 0x0400         : 512
 
 //	opmbaserate = (1L << FREQ_BITS) / (rate * x / 44100) * 55466;
 //	でも今は x == 55466だから…
@@ -484,6 +484,7 @@ void opngen_setreg(REG8 chbase, UINT reg, REG8 value) {
 	OPNSLOT	*slot;
 	UINT	fn;
 	UINT8	blk;
+	UINT	i;
 
 	chpos = reg & 3;
 	if (chpos == 3) {
@@ -558,6 +559,16 @@ void opngen_setreg(REG8 chbase, UINT reg, REG8 value) {
 				break;
 
 			case 0xb0:
+
+				//エンベロープ初期化
+				slot = ch->slot;
+				for (i=0; i<4; i++) {
+					slot->env_mode = EM_ATTACK;
+					slot->env_end = EC_DECAY;
+					slot->env_inc = slot->env_inc_attack;
+					slot->env_cnt = EC_ATTACK;
+					slot++;
+				}
 				ch->algorithm = (UINT8)(value & 7);
 				value = (value >> 3) & 7;
 				if (value) {
@@ -584,6 +595,8 @@ void opngen_keyon(UINT chnum, REG8 value) {
 	REG8	bit;
 	UINT	i;
 
+	SINT32	iEnv;				//現在のエンベロープ値
+
 	sound_sync();
 	opngen.keyreg[chnum] = value;
 	opngen.playing++;
@@ -599,20 +612,31 @@ void opngen_keyon(UINT chnum, REG8 value) {
 					ch->op1fb = 0;
 				}
 				slot->env_mode = EM_ATTACK;
-				slot->env_inc = slot->env_inc_attack;
-				slot->env_cnt = EC_ATTACK;
 				slot->env_end = EC_DECAY;
+				slot->env_inc = slot->env_inc_attack;
+
+				//アタックは、現在のエンベロープの音量から始める。
+				iEnv = opncfg.envcurve[(slot->env_cnt) >> ENV_BITS];	//現在の音量
+			//	slot->env_cnt = EC_ATTACK;
+			//	while((opncfg.envcurve[(slot->env_cnt) >> ENV_BITS]) > iEnv){	//どの位置に該当するか探す。
+			//		if((slot->env_cnt += (1<<ENV_BITS)) >= EC_DECAY ){
+			//			slot->env_cnt  = EC_DECAY;
+			//			break;	//念のため、無限ループ防止
+			//		}
+			//	}
+				slot->env_cnt = (511 - sqrt(sqrt(sqrt(512^7*iEnv))))  * (1 << ENV_BITS);
+				if((slot->env_cnt)<0){slot->env_cnt=0;};
 			}
 		}
 		else {										// keyoff
 			if (slot->env_mode > EM_RELEASE) {
 				slot->env_mode = EM_RELEASE;
-				if (!(slot->env_cnt & EC_DECAY)) {
-					slot->env_cnt = (opncfg.envcurve[slot->env_cnt
-										>> ENV_BITS] << ENV_BITS) + EC_DECAY;
-				}
 				slot->env_end = EC_OFF;
 				slot->env_inc = slot->env_inc_release;
+				if (!(slot->env_cnt & EC_DECAY)) {
+					//まだ、Decayに達していない場合。
+					slot->env_cnt = (opncfg.envcurve[slot->env_cnt >> ENV_BITS] << ENV_BITS) + EC_DECAY;
+				}
 			}
 		}
 		slot++;

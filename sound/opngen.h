@@ -63,11 +63,11 @@ enum {
 #define	OPM_OUTSB		(TL_BITS + 2 - 16)			// OPM output 16bit
 
 #define	SIN_ENT			(1L << SIN_BITS)
-#define	EVC_ENT			(1L << EVC_BITS)
+#define	EVC_ENT			(1L << EVC_BITS)		// 1 << 10 [bit] = 0x0200
 
-#define	EC_ATTACK		0								// ATTACK start
-#define	EC_DECAY		(EVC_ENT << ENV_BITS)			// DECAY start
-#define	EC_OFF			((2 * EVC_ENT) << ENV_BITS)		// OFF
+#define	EC_ATTACK		0								// ATTACK start = 0x0000-0000
+#define	EC_DECAY		(EVC_ENT << ENV_BITS)			// DECAY start  = 0x0200-0000
+#define	EC_OFF			((2 * EVC_ENT) << ENV_BITS)		// OFF          = 0x0400-0000
 
 #define	TL_MAX			(EVC_ENT * 2)
 
