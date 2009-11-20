@@ -50,8 +50,20 @@ static const int extendslot[4] = {2, 3, 1, 0};
 static const int fmslot[4] = {0, 2, 1, 3};
 
 
+//==============================================================
+//			
+//--------------------------------------------------------------
+//	◆引数
+//			
+//	◆返り値
+//			
+//	◆備考
+//			
+//==============================================================
 void opngen_initialize(UINT rate) {
 
+	//------------------
+	//◆Local
 	UINT	ratebit;
 	int		i;
 	int		j;
@@ -59,6 +71,8 @@ void opngen_initialize(UINT rate) {
 	double	freq;
 	UINT32	calcrate;
 
+	//------------------
+	//◆
 	if (rate == 44100) {
 		ratebit = 0;
 	}
@@ -71,6 +85,8 @@ void opngen_initialize(UINT rate) {
 	calcrate = (OPNA_CLOCK / 72) >> ratebit;
 	opncfg.calc1024 = FMDIV_ENT * 44100 / (OPNA_CLOCK / 72);
 
+	//------------------
+	//◆LOG Table
 	for (i=0; i<EVC_ENT; i++) {
 #ifdef OPNGENX86
 		char sft;
@@ -89,6 +105,9 @@ void opngen_initialize(UINT rate) {
 		opncfg.envtable[i] = (long)pom;
 #endif
 	}
+
+	//------------------
+	//◆Sin wave Table
 	for (i=0; i<SIN_ENT; i++) {
 #ifdef OPNGENX86
 		char sft;
@@ -110,13 +129,18 @@ void opngen_initialize(UINT rate) {
 		opncfg.sintable[i] = (long)pom;
 #endif
 	}
+
+	//------------------
+	//◆Envlop table
 	for (i=0; i<EVC_ENT; i++) {				// 0x0000 ～ 0x01FF
 		pom = pow(((double)(EVC_ENT-1-i)/EVC_ENT), 8) * EVC_ENT;
-		opncfg.envcurve[i] = (long)pom;								// 0x0000～0x01FF : ((511-i/512)^8) * 512
-		opncfg.envcurve[EVC_ENT + i] = i;							// 0x0200～0x03FF : i
+		opncfg.envcurve[i] = (long)pom;								// 0x0000～0x03FF : ((511-i/512)^8) * 512
+		opncfg.envcurve[EVC_ENT + i] = i;							// 0x0400～0x07FF : i
 	}
-	opncfg.envcurve[EVC_ENT*2] = EVC_ENT;							// 0x0400         : 512
+	opncfg.envcurve[EVC_ENT*2] = EVC_ENT;							// 0x0800         : 512
 
+	//------------------
+	//◆
 //	opmbaserate = (1L << FREQ_BITS) / (rate * x / 44100) * 55466;
 //	でも今は x == 55466だから…
 
@@ -131,6 +155,8 @@ void opngen_initialize(UINT rate) {
 		opncfg.ratebit = 2 + (FREQ_BITS - 16);
 	}
 
+	//------------------
+	//◆
 	for (i=0; i<4; i++) {
 		for (j=0; j<32; j++) {
 #if (FREQ_BITS >= 21)
@@ -144,6 +170,9 @@ void opngen_initialize(UINT rate) {
 			detunetable[i+4][j] = (long)-freq;
 		}
 	}
+
+	//------------------
+	//◆
 	for (i=0; i<4; i++) {
 		attacktable[i] = decaytable[i] = 0;
 	}
@@ -178,6 +207,16 @@ void opngen_initialize(UINT rate) {
 	}
 }
 
+//==============================================================
+//			
+//--------------------------------------------------------------
+//	◆引数
+//			
+//	◆返り値
+//			
+//	◆備考
+//			
+//==============================================================
 void opngen_setvol(UINT vol) {
 
 	opncfg.fmvol = vol * 5 / 4;
@@ -186,6 +225,16 @@ void opngen_setvol(UINT vol) {
 #endif
 }
 
+//==============================================================
+//			
+//--------------------------------------------------------------
+//	◆引数
+//			
+//	◆返り値
+//			
+//	◆備考
+//			
+//==============================================================
 void opngen_setVR(REG8 channel, REG8 value) {
 
 	if ((channel & 3) && (value)) {
@@ -201,6 +250,16 @@ void opngen_setVR(REG8 channel, REG8 value) {
 
 // ----
 
+//==============================================================
+//			
+//--------------------------------------------------------------
+//	◆引数
+//			
+//	◆返り値
+//			
+//	◆備考
+//			
+//==============================================================
 static void set_algorithm(OPNCH *ch) {
 
 	SINT32	*outd;
@@ -279,12 +338,32 @@ static void set_algorithm(OPNCH *ch) {
 	ch->outslot = outslot;
 }
 
+//==============================================================
+//			
+//--------------------------------------------------------------
+//	◆引数
+//			
+//	◆返り値
+//			
+//	◆備考
+//			
+//==============================================================
 static void set_dt1_mul(OPNSLOT *slot, REG8 value) {
 
 	slot->multiple = (SINT32)multipletable[value & 0x0f];
 	slot->detune1 = detunetable[(value >> 4) & 7];
 }
 
+//==============================================================
+//			
+//--------------------------------------------------------------
+//	◆引数
+//			
+//	◆返り値
+//			
+//	◆備考
+//			
+//==============================================================
 static void set_tl(OPNSLOT *slot, REG8 value) {
 
 #if (EVC_BITS >= 7)
@@ -294,6 +373,16 @@ static void set_tl(OPNSLOT *slot, REG8 value) {
 #endif
 }
 
+//==============================================================
+//			
+//--------------------------------------------------------------
+//	◆引数
+//			
+//	◆返り値
+//			
+//	◆備考
+//			
+//==============================================================
 static void set_ks_ar(OPNSLOT *slot, REG8 value) {
 
 	slot->keyscale = ((~value) >> 6) & 3;
@@ -305,6 +394,16 @@ static void set_ks_ar(OPNSLOT *slot, REG8 value) {
 	}
 }
 
+//==============================================================
+//			
+//--------------------------------------------------------------
+//	◆引数
+//			
+//	◆返り値
+//			
+//	◆備考
+//			
+//==============================================================
 static void set_d1r(OPNSLOT *slot, REG8 value) {
 
 	value &= 0x1f;
@@ -315,6 +414,16 @@ static void set_d1r(OPNSLOT *slot, REG8 value) {
 	}
 }
 
+//==============================================================
+//			
+//--------------------------------------------------------------
+//	◆引数
+//			
+//	◆返り値
+//			
+//	◆備考
+//			
+//==============================================================
 static void set_dt2_d2r(OPNSLOT *slot, REG8 value) {
 
 	value &= 0x1f;
@@ -330,6 +439,16 @@ static void set_dt2_d2r(OPNSLOT *slot, REG8 value) {
 	}
 }
 
+//==============================================================
+//			
+//--------------------------------------------------------------
+//	◆引数
+//			
+//	◆返り値
+//			
+//	◆備考
+//			
+//==============================================================
 static void set_d1l_rr(OPNSLOT *slot, REG8 value) {
 
 	slot->decaylevel = decayleveltable[(value >> 4)];
@@ -346,6 +465,16 @@ static void set_d1l_rr(OPNSLOT *slot, REG8 value) {
 	}
 }
 
+//==============================================================
+//			
+//--------------------------------------------------------------
+//	◆引数
+//			
+//	◆返り値
+//			
+//	◆備考
+//			
+//==============================================================
 static void set_ssgeg(OPNSLOT *slot, REG8 value) {
 
 	value &= 0xf;
@@ -362,6 +491,16 @@ static void set_ssgeg(OPNSLOT *slot, REG8 value) {
 	}
 }
 
+//==============================================================
+//			
+//--------------------------------------------------------------
+//	◆引数
+//			
+//	◆返り値
+//			
+//	◆備考
+//			
+//==============================================================
 static void channleupdate(OPNCH *ch) {
 
 	int		i;
@@ -405,6 +544,16 @@ static void channleupdate(OPNCH *ch) {
 
 // ----
 
+//==============================================================
+//			
+//--------------------------------------------------------------
+//	◆引数
+//			
+//	◆返り値
+//			
+//	◆備考
+//			
+//==============================================================
 void opngen_reset(void) {
 
 	OPNCH	*ch;
@@ -442,6 +591,16 @@ void opngen_reset(void) {
 	}
 }
 
+//==============================================================
+//			
+//--------------------------------------------------------------
+//	◆引数
+//			
+//	◆返り値
+//			
+//	◆備考
+//			
+//==============================================================
 void opngen_setcfg(REG8 maxch, UINT flag) {
 
 	OPNCH	*ch;
@@ -469,6 +628,16 @@ void opngen_setcfg(REG8 maxch, UINT flag) {
 	}
 }
 
+//==============================================================
+//			
+//--------------------------------------------------------------
+//	◆引数
+//			
+//	◆返り値
+//			
+//	◆備考
+//			
+//==============================================================
 void opngen_setextch(UINT chnum, REG8 data) {
 
 	OPNCH	*ch;
@@ -477,6 +646,16 @@ void opngen_setextch(UINT chnum, REG8 data) {
 	ch[chnum].extop = data;
 }
 
+//==============================================================
+//			
+//--------------------------------------------------------------
+//	◆引数
+//			
+//	◆返り値
+//			
+//	◆備考
+//			
+//==============================================================
 void opngen_setreg(REG8 chbase, UINT reg, REG8 value) {
 
 	UINT	chpos;
@@ -597,6 +776,16 @@ void opngen_setreg(REG8 chbase, UINT reg, REG8 value) {
 	}
 }
 
+//==============================================================
+//			
+//--------------------------------------------------------------
+//	◆引数
+//			
+//	◆返り値
+//			
+//	◆備考
+//			
+//==============================================================
 void opngen_keyon(UINT chnum, REG8 value) {
 
 	OPNCH	*ch;
@@ -621,14 +810,18 @@ void opngen_keyon(UINT chnum, REG8 value) {
 					ch->op1fb = 0;
 				}
 				//アタックは、現在のエンベロープの音量から始める。
+				iEnv = opncfg.envcurve[slot->env_cnt >> ENV_BITS];	//現在の音量
+
+				//Debug用
+				TRACEOUT(("keyon:ch=%d, env_mode=%d, env_end=%d, env_cnt[%d] = %d ", i, slot->env_mode, slot->env_end, slot->env_cnt, iEnv));
+			
 				slot->env_mode = EM_ATTACK;
 				slot->env_end = EC_DECAY;
 				slot->env_inc = slot->env_inc_attack;
-				iEnv = opncfg.envcurve[(slot->env_cnt) >> ENV_BITS];	//現在の音量
 				if(iEnv==0) {
 					slot->env_cnt  = EC_DECAY;
 				} else {
-					slot->env_cnt = (SINT32)(EVC_ENT-1 -sqrt(EVC_ENT*sqrt(EVC_ENT*sqrt(EVC_ENT*iEnv)))) << ENV_BITS;
+					slot->env_cnt = (long)(EVC_ENT-1 -sqrt(EVC_ENT*sqrt(EVC_ENT*sqrt(EVC_ENT*iEnv)))) << ENV_BITS;
 				//	if((slot->env_cnt)< EC_ATTACK ){
 				//		slot->env_cnt = EC_ATTACK;
 				//	}

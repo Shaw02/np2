@@ -13,6 +13,9 @@
 		/>
 	</Platforms>
 	<ToolFiles>
+		<DefaultToolFile
+			FileName="masm.rules"
+		/>
 	</ToolFiles>
 	<Configurations>
 		<Configuration
@@ -30,6 +33,9 @@
 			/>
 			<Tool
 				Name="VCCustomBuildTool"
+			/>
+			<Tool
+				Name="MASM"
 			/>
 			<Tool
 				Name="VCXMLDataGeneratorTool"
@@ -128,6 +134,9 @@
 				Name="VCCustomBuildTool"
 			/>
 			<Tool
+				Name="MASM"
+			/>
+			<Tool
 				Name="VCXMLDataGeneratorTool"
 			/>
 			<Tool
@@ -151,6 +160,7 @@
 				BasicRuntimeChecks="3"
 				RuntimeLibrary="1"
 				PrecompiledHeaderFile=".\..\obj\dbg/np2.pch"
+				AssemblerOutput="2"
 				AssemblerListingLocation=".\..\obj\dbg/"
 				ObjectFile=".\..\obj\dbg/"
 				ProgramDataBaseFileName=".\..\obj\dbg/"
@@ -221,6 +231,9 @@
 			/>
 			<Tool
 				Name="VCCustomBuildTool"
+			/>
+			<Tool
+				Name="MASM"
 			/>
 			<Tool
 				Name="VCXMLDataGeneratorTool"
@@ -317,6 +330,9 @@
 			/>
 			<Tool
 				Name="VCCustomBuildTool"
+			/>
+			<Tool
+				Name="MASM"
 			/>
 			<Tool
 				Name="VCXMLDataGeneratorTool"
@@ -416,6 +432,9 @@
 				Name="VCCustomBuildTool"
 			/>
 			<Tool
+				Name="MASM"
+			/>
+			<Tool
 				Name="VCXMLDataGeneratorTool"
 			/>
 			<Tool
@@ -442,6 +461,7 @@
 				RuntimeLibrary="0"
 				EnableFunctionLevelLinking="true"
 				PrecompiledHeaderFile=".\..\obj\rel/np2.pch"
+				AssemblerOutput="2"
 				AssemblerListingLocation=".\..\obj\rel/"
 				ObjectFile=".\..\obj\rel/"
 				ProgramDataBaseFileName=".\..\obj\rel/"
@@ -512,6 +532,9 @@
 			/>
 			<Tool
 				Name="VCCustomBuildTool"
+			/>
+			<Tool
+				Name="MASM"
 			/>
 			<Tool
 				Name="VCXMLDataGeneratorTool"
@@ -6877,6 +6900,10 @@
 					</FileConfiguration>
 				</File>
 				<File
+					RelativePath=".\x86\OPNGENG.asm"
+					>
+				</File>
+				<File
 					RelativePath="x86\OPNGENG.X86"
 					>
 					<FileConfiguration
@@ -6921,6 +6948,7 @@
 					</FileConfiguration>
 					<FileConfiguration
 						Name="Release|Win32"
+						ExcludedFromBuild="true"
 						>
 						<Tool
 							Name="VCCustomBuildTool"
