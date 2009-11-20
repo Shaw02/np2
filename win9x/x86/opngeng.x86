@@ -145,32 +145,32 @@ ENVTABLE	equ		(_opncfg + opncfg_t.envtable)
 
 %macro	setenv		3
 %1:				mov		dl, [edi + slot_t.env_mode]
-				dec		dl
-				je		short %%setrr
-				dec		dl
-				je		short %%setd2
-				dec		dl
-				je		short %%setd1
-				dec		dl
-				jne		short %%envret
-				mov		byte [edi + slot_t.env_mode], EM_DECAY1
+				dec		dl				;
+				je		short %%setrr	;RR
+				dec		dl				;
+				je		short %%setd2	;SR
+				dec		dl				;
+				je		short %%setd1	;DR
+				dec		dl				;
+				jne		short %%envret	;
+				mov		byte [edi + slot_t.env_mode], EM_DECAY1		;AR(4)
 				mov		eax, [edi + slot_t.decaylevel]
 				mov		[edi + slot_t.env_end], eax
 				mov		eax, [edi + slot_t.env_inc_decay1]
 				mov		[edi + slot_t.env_inc], eax
 				mov		eax, EC_DECAY
 %%envret:		jmp		near %2
-%%setd1:		mov		byte [edi + slot_t.env_mode], EM_DECAY2
+%%setd1:		mov		byte [edi + slot_t.env_mode], EM_DECAY2		;DR(3)
 				mov		dword [edi + slot_t.env_end], EC_OFF
 				mov		eax, [edi + slot_t.env_inc_decay2]
 				mov		[edi + slot_t.env_inc], eax
 				mov		eax, [edi + slot_t.decaylevel]
 				jmp		near %2
-%%setrr:		mov		byte [edi + slot_t.env_mode], EM_OFF
-%%setd2:		mov		dword [edi + slot_t.env_end], EC_OFF + 1
+%%setrr:		mov		byte [edi + slot_t.env_mode], EM_OFF		;SR(2)
+%%setd2:		mov		dword [edi + slot_t.env_end], EC_DECAY		;RR(1)
 				and		dword [edi + slot_t.env_inc], byte 0
 				and		byte [esi + ch_t.playing], ~(%3)
-				mov		eax, EC_OFF
+				mov		eax, EC_ATTACK
 				jmp		near %2
 %endmacro
 

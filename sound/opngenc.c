@@ -563,10 +563,19 @@ void opngen_setreg(REG8 chbase, UINT reg, REG8 value) {
 				//エンベロープ初期化
 				slot = ch->slot;
 				for (i=0; i<4; i++) {
-					slot->env_mode = EM_ATTACK;
-					slot->env_end = EC_DECAY;
-					slot->env_inc = slot->env_inc_attack;
-					slot->env_cnt = EC_ATTACK;
+					//発音中だったら、アタックからやり直す。
+					if(slot->env_mode > EM_RELEASE){
+						slot->env_mode = EM_ATTACK;
+						slot->env_cnt = EC_ATTACK;
+						slot->env_end = EC_DECAY;
+						slot->env_inc = slot->env_inc_attack;
+					//note off中だったら、発音なっしんぐ。
+					} else {
+						slot->env_mode = EM_OFF;
+						slot->env_cnt = EC_ATTACK;
+						slot->env_end = EC_DECAY;
+						slot->env_inc = 0;
+					}
 					slot++;
 				}
 				ch->algorithm = (UINT8)(value & 7);
@@ -611,21 +620,19 @@ void opngen_keyon(UINT chnum, REG8 value) {
 				if (i == OPNSLOT1) {
 					ch->op1fb = 0;
 				}
+				//アタックは、現在のエンベロープの音量から始める。
 				slot->env_mode = EM_ATTACK;
 				slot->env_end = EC_DECAY;
 				slot->env_inc = slot->env_inc_attack;
-
-				//アタックは、現在のエンベロープの音量から始める。
 				iEnv = opncfg.envcurve[(slot->env_cnt) >> ENV_BITS];	//現在の音量
-			//	slot->env_cnt = EC_ATTACK;
-			//	while((opncfg.envcurve[(slot->env_cnt) >> ENV_BITS]) > iEnv){	//どの位置に該当するか探す。
-			//		if((slot->env_cnt += (1<<ENV_BITS)) >= EC_DECAY ){
-			//			slot->env_cnt  = EC_DECAY;
-			//			break;	//念のため、無限ループ防止
-			//		}
-			//	}
-				slot->env_cnt = (511 - sqrt(sqrt(sqrt(512^7*iEnv))))  * (1 << ENV_BITS);
-				if((slot->env_cnt)<0){slot->env_cnt=0;};
+				if(iEnv==0) {
+					slot->env_cnt  = EC_DECAY;
+				} else {
+					slot->env_cnt = (SINT32)(EVC_ENT-1 -sqrt(EVC_ENT*sqrt(EVC_ENT*sqrt(EVC_ENT*iEnv)))) << ENV_BITS;
+				//	if((slot->env_cnt)< EC_ATTACK ){
+				//		slot->env_cnt = EC_ATTACK;
+				//	}
+				}
 			}
 		}
 		else {										// keyoff
