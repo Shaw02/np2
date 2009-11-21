@@ -456,12 +456,12 @@ static void set_d1l_rr(OPNSLOT *slot, REG8 value) {
 	slot->env_inc_release = slot->release[slot->envratio];
 	if (slot->env_mode == EM_RELEASE) {
 		slot->env_inc = slot->env_inc_release;
-		if (value == 0xff) {
-			slot->env_mode = EM_OFF;
-			slot->env_cnt = EC_OFF;
-			slot->env_end = EC_OFF + 1;
-			slot->env_inc = 0;
-		}
+//		if (value == 0xff) {
+//			slot->env_mode = EM_OFF;
+//			slot->env_cnt = EC_OFF;
+//			slot->env_end = EC_OFF + 1;
+//			slot->env_inc = 0;
+//		}
 	}
 }
 
@@ -811,20 +811,16 @@ void opngen_keyon(UINT chnum, REG8 value) {
 				}
 				//アタックは、現在のエンベロープの音量から始める。
 				iEnv = opncfg.envcurve[slot->env_cnt >> ENV_BITS];	//現在の音量
-
-				//Debug用
-				TRACEOUT(("keyon:ch=%d, env_mode=%d, env_end=%d, env_cnt[%d] = %d ", i, slot->env_mode, slot->env_end, slot->env_cnt, iEnv));
-			
 				slot->env_mode = EM_ATTACK;
 				slot->env_end = EC_DECAY;
 				slot->env_inc = slot->env_inc_attack;
 				if(iEnv==0) {
 					slot->env_cnt  = EC_DECAY;
 				} else {
-					slot->env_cnt = (long)(EVC_ENT-1 -sqrt(EVC_ENT*sqrt(EVC_ENT*sqrt(EVC_ENT*iEnv)))) << ENV_BITS;
-				//	if((slot->env_cnt)< EC_ATTACK ){
-				//		slot->env_cnt = EC_ATTACK;
-				//	}
+					slot->env_cnt = (long)((EVC_ENT-1 -sqrt(EVC_ENT*sqrt(EVC_ENT*sqrt(EVC_ENT*iEnv)))) * (1 << ENV_BITS));
+					if((slot->env_cnt)< EC_ATTACK ){
+						slot->env_cnt = EC_ATTACK;
+					}
 				}
 			}
 		}
