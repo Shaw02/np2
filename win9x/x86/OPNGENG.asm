@@ -86,6 +86,7 @@ pan			db	?
 extop			db	?
 stereo			db	2	dup(?)
 ch_t			ends
+ch_t_off		equ	sizeof(slot_t) * 4
 
 opngen_t		struc 
 playchannels		dd	?
@@ -148,14 +149,15 @@ opncfg_t		ends
 ;	edi	ch->slot
 ;===============================================================
 op_out	macro
-	add	eax, (slot_t ptr [edi]).freq_cnt	;(u)
-	shr	eax, (FREQ_BITS - SIN_BITS)		;(u) shrはu-pipe限定
-	and	eax, (SIN_ENT - 1)			;(u)
-	mov	cl, [sinshift + eax]			;(v)
-	mov	eax, [opncfg + eax*4].sintable		;(u)
-	add	cl, [envshift + edx]			;(v)
-	imul	eax, [opncfg + edx*4].envtable		;(np) ペアリング不可
-	sar	eax, cl					;(np) ペアリング不可
+	add	eax, (slot_t ptr [edi]).freq_cnt	;(u)	2
+	mov	cl, envshift[edx]			;(v)	1
+	shr	eax, (FREQ_BITS - SIN_BITS)		;(u)		shrはu-pipe限定
+	mov	edx, opncfg.envtable[edx*4]		;(v)	1
+	and	eax, (SIN_ENT - 1)			;(u)	1
+	add	cl, sinshift[eax]			;(v)	2
+	mov	eax, opncfg.sintable[eax*4]		;(u)	1
+	imul	eax, edx				;(np)	1	ペアリング不可
+	sar	eax, cl					;(np)		ペアリング不可
 	endm
 ;===============================================================
 ;		エンベロープ計算
@@ -171,43 +173,45 @@ op_out	macro
 calcenv	macro	p3
 							;()内は、CPU(586以降)のpipe。
 	;Freqency & Envlop
-	mov	eax, (slot_t ptr [edi]).env_cnt		;(u)
-	mov	edx, (slot_t ptr [edi]).freq_inc	;(v)
-	add	eax, (slot_t ptr [edi]).env_inc		;(u)
-	add	(slot_t ptr [edi]).freq_cnt, edx	;(v)
+	mov	eax, (slot_t ptr [edi]).env_cnt		;(u)	1
+	mov	edx, (slot_t ptr [edi]).freq_inc	;(v)	1
+	add	eax, (slot_t ptr [edi]).env_inc		;(u)	2
+	add	(slot_t ptr [edi]).freq_cnt, edx	;(v)	3
 
 	;フェーズ チェンジ
 	.if	( eax >= dword ptr (slot_t ptr [edi]).env_end )
 	   mov	dl, (slot_t ptr [edi]).env_mode
 	   .if		(dl == EM_ATTACK)		;AR(4)
-		mov	(slot_t ptr [edi]).env_mode, EM_DECAY1	;(u)
-		mov	eax, (slot_t ptr [edi]).decaylevel	;(v)
-		mov	edx, (slot_t ptr [edi]).env_inc_decay1	;(u)
-		mov	(slot_t ptr [edi]).env_end, eax		;(v)
-		mov	(slot_t ptr [edi]).env_inc, edx		;(u)
-		mov	eax, EC_DECAY				;(v)
+		mov	(slot_t ptr [edi]).env_mode, EM_DECAY1	;(u)	2
+		mov	eax, (slot_t ptr [edi]).decaylevel	;(v)	1
+		mov	edx, (slot_t ptr [edi]).env_inc_decay1	;(u)	1
+		mov	(slot_t ptr [edi]).env_end, eax		;(v)	2
+		mov	(slot_t ptr [edi]).env_inc, edx		;(u)	2
+		mov	eax, EC_DECAY				;(v)	1
 	   .elseif	(dl == EM_DECAY1)		;DR(3)
-		mov	(slot_t ptr [edi]).env_mode, EM_DECAY2	;(u)
-		mov	edx, (slot_t ptr [edi]).env_inc_decay2	;(v)
-		mov	(slot_t ptr [edi]).env_end, EC_OFF	;(u)
-		mov	(slot_t ptr [edi]).env_inc, edx		;(v)
-		mov	eax, (slot_t ptr [edi]).decaylevel	;(u)
+		mov	(slot_t ptr [edi]).env_mode, EM_DECAY2	;(u)	2
+		mov	edx, (slot_t ptr [edi]).env_inc_decay2	;(v)	1
+		mov	(slot_t ptr [edi]).env_end, EC_OFF	;(u)	2
+		mov	(slot_t ptr [edi]).env_inc, edx		;(v)	2
+		mov	eax, (slot_t ptr [edi]).decaylevel	;(u)	1
 	   .else					;SR(2) & RR(1) % OFF(0)
 		.if	(dl == EM_RELEASE)
-		  mov	(slot_t ptr [edi]).env_mode, EM_OFF	;(u)
+		  mov	(slot_t ptr [edi]).env_mode, EM_OFF	;(u)	2
 		.endif
-		and	(ch_t ptr [esi]).playing, (not p3)	;(v)
-		xor	eax,eax					;(u)	EC_ATTACK
-		mov	(slot_t ptr [edi]).env_end, EC_DECAY	;(v)
-		mov	(slot_t ptr [edi]).env_inc, eax		;(u)	0
+		and	(ch_t ptr [esi]).playing, (not p3)	;(v)	3
+		mov	eax, EC_OFF +1				;(u)	1	EC_ATTACK
+		xor	edx, edx				;(v)	1
+		mov	(slot_t ptr [edi]).env_end, eax		;(u)	2
+		mov	(slot_t ptr [edi]).env_inc, edx		;(v)	2
+		dec	eax					;(u)
 	   .endif
 	.endif
 	;音量計算
-	mov	(slot_t ptr [edi]).env_cnt, eax			;(u)
-	mov	edx, (slot_t ptr [edi]).totallevel		;(v)
-	shr	eax, ENV_BITS					;(u)	eax >> ENV_BITS
-	sub	edx, [opncfg + eax*4].envcurve			;(u) (直ぐにeaxを使う為、ペアリング不可)
-	endm							;でも、次は、jl命令(v-pipe)が来ている。
+	mov	(slot_t ptr [edi]).env_cnt, eax			;(u)	2
+	mov	edx, (slot_t ptr [edi]).totallevel		;(v)	1
+	shr	eax, ENV_BITS					;(u)		eax >> ENV_BITS
+	sub	edx, opncfg.envcurve[eax*4]			;(u)	2	(直ぐにeaxを使う為、ペアリング不可)
+	endm							;		でも、次は、jl命令(v-pipe)が来ている。
 ;===============================================================
 ;		
 ;---------------------------------------------------------------
@@ -221,174 +225,202 @@ calcenv	macro	p3
 ;	esi	chの構造体
 ;	edi	slotの構造体
 ;===============================================================
-;				align	16
+	align	16
 @opngen_getpcm@12	proc	near	syscall	public	uses ebx esi edi,
 	OPN_LENG:DWORD
 	;Local変数
 	local	OPN_SAMPL	:DWORD
 	local	OPN_SAMPR	:DWORD
+	local	pcm		:ptr byte
 
-	lea	edi, [opngen]
+	xor	ecx,ecx				;ecx = 0
+	mov	pcm, edx			;*buf
 
-   .if	((dword ptr (opngen_t ptr [edi]).playing) != 0)
+   .if	(dword ptr opngen.playing != ecx)
 
-	lea	esi, [edx]			;*buf
-	mov	ebx, (opngen_t ptr [edi]).calcremain
+	mov	ebx, opngen.calcremain
 
-	.while	(OPN_LENG > 0)
-	   mov	eax, ebx
-	   imul	ebx, (opngen_t ptr [edi]).outdl
-	   mov	OPN_SAMPL, ebx				;OPN_SAMPL = opngen.outdl * opngen.calcremain
-	   mov	ebx, FMDIV_ENT
-	   sub	ebx, eax
-	   imul	eax, (opngen_t ptr [edi]).outdr
-	   mov	OPN_SAMPR, eax				;OPN_SAMPL = opngen.outdl * opngen.calcremain
-	   push	esi
+	align	16
+
+	.while	(OPN_LENG > ecx)
+	   mov	eax, opngen.outdl			;(u)	1
+	   imul	eax,ebx					;(np)	1
+	   mov	edx, opngen.outdr			;(u)	1
+	   mov	OPN_SAMPL, eax				;(v)	2	OPN_SAMPL = opngen.outdl * opngen.calcremain
+	   imul	edx,ebx					;(np)	1
+	   mov	eax,ebx					;(u)	1
+	   mov	OPN_SAMPR, edx				;(u)	2	OPN_SAMPL = opngen.outdr * opngen.calcremain
+	   mov	ebx, FMDIV_ENT				;(v)	1
+	   sub	ebx, eax				;(v)	1	ebx = FMDIV_ENT - opngen.calcremain
+
 	   .repeat
-		xor	eax,eax				;eax=0	;(u)
-		lea	esi, [opnch]				;(v)
-		mov	(opngen_t ptr [edi]).playing, eax	;(u)
-		mov	(opngen_t ptr [edi]).calcremain, ebx	;(v)
-		mov	(opngen_t ptr [edi]).outdl, eax		;(u)
-		mov	(opngen_t ptr [edi]).outdc, eax		;()
-		mov	(opngen_t ptr [edi]).outdr, eax		;()
-		movzx	ecx, byte ptr ((opngen_t ptr [edi]).playchannels)
-		push	edi
-		.while	(ecx>0)					;ch数だけ繰り返す。
-		   mov	al, (ch_t ptr [esi]).outslot		;出力するslotはKeyOnされているか？
-		   .if	(al & (byte ptr (ch_t ptr [esi]).playing))
-			push	ecx
-			xor	ecx,ecx
-			lea	edi, [esi]
-			mov	[opngen].feedback2, ecx
-			mov	[opngen].feedback3, ecx
-			mov	[opngen].feedback4, ecx
-			.repeat
-				;Freqency & Envlop
-				mov	eax, (slot_t ptr [edi]).env_cnt		;(u)
-				mov	edx, (slot_t ptr [edi]).freq_inc	;(v)
-				add	eax, (slot_t ptr [edi]).env_inc		;(u)
-				add	(slot_t ptr [edi]).freq_cnt, edx	;(v)
-				;フェーズ チェンジ
-				.if	( eax >= dword ptr (slot_t ptr [edi]).env_end )
-				   mov	dl, (slot_t ptr [edi]).env_mode
-				   .if		(dl == EM_ATTACK)		;AR(4)
-					mov	(slot_t ptr [edi]).env_mode, EM_DECAY1	;(u)
-					mov	eax, (slot_t ptr [edi]).decaylevel	;(v)
-					mov	edx, (slot_t ptr [edi]).env_inc_decay1	;(u)
-					mov	(slot_t ptr [edi]).env_end, eax		;(v)
-					mov	(slot_t ptr [edi]).env_inc, edx		;(u)
-					mov	eax, EC_DECAY				;(v)
-				   .elseif	(dl == EM_DECAY1)		;DR(3)
-					mov	(slot_t ptr [edi]).env_mode, EM_DECAY2	;(u)
-					mov	edx, (slot_t ptr [edi]).env_inc_decay2	;(v)
-					mov	(slot_t ptr [edi]).env_end, EC_OFF	;(u)
-					mov	(slot_t ptr [edi]).env_inc, edx		;(v)
-					mov	eax, (slot_t ptr [edi]).decaylevel	;(u)
-				   .else					;SR(2) & RR(1) % OFF(0)
-					.if	(dl == EM_RELEASE)
-					  mov	(slot_t ptr [edi]).env_mode, EM_OFF	;(u)
-					.endif
-					mov	dl,(not 01h)				;(u)
-					mov	(slot_t ptr [edi]).env_end, EC_DECAY	;(v)
-					rol	dl,cl
-					xor	eax,eax					;(u)	EC_ATTACK
-					and	(ch_t ptr [esi]).playing, dl		;(v)
-					mov	(slot_t ptr [edi]).env_inc, eax		;(u)	0
-				   .endif
-				.endif
-				;音量計算
-				mov	(slot_t ptr [edi]).env_cnt, eax			;(u)
-				mov	edx, (slot_t ptr [edi]).totallevel		;(v)
-				shr	eax, ENV_BITS					;(u)	eax >> ENV_BITS
-				sub	edx, [opncfg + eax*4].envcurve			;(u) (直ぐにeaxを使う為、ペアリング不可)
-				jl	og_calcslot3
+		mov	opngen.playing, ecx		;(v)	2
+		mov	opngen.outdl, ecx		;(u)	2
+		mov	opngen.outdc, ecx		;(v)	2
+		mov	opngen.outdr, ecx		;(u)	2
+		lea	esi, [opnch + ch_t_off]		;(u)	1
+		mov	opngen.calcremain, ebx		;(v)	2
+		mov	ecx, opngen.playchannels	;(u)	1
 
-				mov	ebx,ecx
-				.if	(ecx==0)
-					mov	cl, (ch_t ptr [esi]).feedback		;4PI=1 | 2PI=2 | PI=3 | PI/2=4 | PI/4=5 | PI/8=6 | PI/16=7 | Off=0
-					.if	(cl == 0)
-						xor	eax,eax
+		align	16
+
+		.while	(ecx != 0)				;ch数だけ繰り返す。
+		   mov	al, (ch_t ptr [esi - ch_t_off]).outslot		;出力するslotはKeyOnされているか？
+		   .if	(al & (byte ptr (ch_t ptr [esi - ch_t_off]).playing))
+			push	ecx				;(u)	4
+			lea	edi, [esi - ch_t_off]		;(v)	1
+			xor	eax,eax				;(u)	1
+			xor	ecx,ecx				;(v)	1	パーシャルレジスタ防止も兼ねる
+			mov	opngen.feedback2, eax		;(u)	2
+			mov	opngen.feedback3, eax		;(v)	2
+			mov	opngen.feedback4, eax		;(u)	2
+			mov	ch,(not 01h)			;(v)	1
+
+			align	16
+
+			.repeat					;	jmp命令になる。
+				;Freqency & Envlop
+				mov	eax, (slot_t ptr [edi]).env_cnt		;(u)	1
+				mov	edx, (slot_t ptr [edi]).freq_inc	;(v)	1
+				add	eax, (slot_t ptr [edi]).env_inc		;(u)	2
+				add	(slot_t ptr [edi]).freq_cnt, edx	;(v)	3
+				cmp	eax, dword ptr (slot_t ptr [edi]).env_end	;2
+				jnc	PhaseChange					;1
+PhaseChangeEndPoint:
+				mov	(slot_t ptr [edi]).env_cnt, eax			;(u)	2
+				mov	edx, (slot_t ptr [edi]).totallevel		;(v)	1
+				shr	eax, ENV_BITS					;(u)		eax >> ENV_BITS
+				sub	edx, opncfg.envcurve[eax*4]			;(u)	2	(直ぐにeaxを使う為、ペアリング不可)
+				jl	og_calcslot3					;(v)	1	条件ジャンプは(v)限定。
+
+				push	ecx						;(u)	4
+				.if	(cl == 0)					;(u→v)
+					mov	ebx,(ch_t ptr [esi - ch_t_off]).op1fb	;(u)	1	with feedback
+					mov	cl, (ch_t ptr [esi - ch_t_off]).feedback;(v)	1	4PI=1 | 2PI=2 | PI=3 | PI/2=4 | PI/4=5 | PI/8=6 | PI/16=7 | Off=0
+					.if	(cl == 0)				;(u→v)
+						xor	eax,eax				;(u)	1
+					.else						;(v)
+						mov	eax,ebx				;(u)	1
+						shr	eax,cl				;(u)	
+					.endif						;(v)
+					op_out
+					mov	(ch_t ptr [esi - ch_t_off]).op1fb, eax		;(u)	2
+					add	eax,ebx						;(v)	1
+					sar	eax,1						;(np)
+					.if	(byte ptr (ch_t ptr [esi - ch_t_off]).algorithm != 5)
+						mov	ebx,(ch_t ptr [esi - ch_t_off]).connect1	; case ALG != 5
+						add	[ebx], eax
 					.else
-						mov	eax, (ch_t ptr [esi]).op1fb	; with feedback
-						shr	eax,cl
+						mov	opngen.feedback2, eax		;(u)	2	case ALG == 5
+						mov	opngen.feedback3, eax		;(v)	2
+						mov	opngen.feedback4, eax		;(u)	2	i586はこの方が早い
 					.endif
 				.else
-					mov	eax, [opngen -4 + ecx * 4].feedback2
+					.if	(cl==1)
+						mov	eax, opngen.feedback2				;(u)	1
+						mov	ebx,(ch_t ptr [esi - ch_t_off]).connect2	; 08h	1
+					.elseif	(cl==2)
+						mov	eax, opngen.feedback3				;(u)	1
+						mov	ebx,(ch_t ptr [esi - ch_t_off]).connect3	; 04h	1
+					.else
+						mov	eax, opngen.feedback4				;(u)	1
+						mov	ebx,(ch_t ptr [esi - ch_t_off]).connect4	; 0Ch	1
+					.endif
+					op_out
+					add	[ebx], eax	;	1
 				.endif
-				add	eax, (slot_t ptr [edi]).freq_cnt	;(u)
-				shr	eax, (FREQ_BITS - SIN_BITS)		;(u) shrはu-pipe限定
-				and	eax, (SIN_ENT - 1)			;(u)
-				mov	cl, [sinshift + eax]			;(v)
-				mov	eax, [opncfg + eax*4].sintable		;(u)
-				add	cl, [envshift + edx]			;(v)
-				imul	eax, [opncfg + edx*4].envtable		;(np) ペアリング不可
-				sar	eax, cl					;(np) ペアリング不可
-				mov	ecx,ebx
-				.if	(ebx==0)
-				   mov	(ch_t ptr [esi]).op1fb, eax
-				   .if	(byte ptr ((ch_t ptr [esi]).algorithm) == 5)
-					mov	[opngen].feedback2, eax		; case ALG == 5
-					mov	[opngen].feedback3, eax
-					mov	[opngen].feedback4, eax
-					jmp	og_calcslot3
-				   .endif
-				.elseif	((ebx==1) || (ebx==2))
-					mov	ebx,3
-					sub	ebx,ecx
-				.endif
-				mov	ebx, (ch_t ptr [esi + ebx * 4]).connect1	;
-				add	[ebx], eax
-og_calcslot3:		
-				add	edi, sizeof(slot_t)	;
-				inc	ecx
-			.until	(ecx >= 4)
-			inc	[opngen].playing
-			pop	ecx
+				pop	ecx			;(u)	4
+og_calcslot3:
+				rol	ch,1			;(u)	
+				add	edi, sizeof(slot_t)	;	1
+				inc	cl			;	1
+			.until	(cl >= 4)
+			inc	opngen.playing			;	3
+			pop	ecx				;	4
 		   .endif
-		   add	esi, sizeof(ch_t)
-		   dec	ecx
+		   add	esi, sizeof(ch_t)			;(u)	1
+		   dec	ecx					;(v)	1
 		.endw
-		pop	edi					;(u)
-		mov	eax, (opngen_t ptr [edi]).outdc		;
-		mov	edx, [opncfg].calc1024			;(u)
-		add	(opngen_t ptr [edi]).outdl, eax		;
-		add	(opngen_t ptr [edi]).outdr, eax		;(u)
-		mov	ebx, (opngen_t ptr [edi]).calcremain	;
-		sar	(opngen_t ptr [edi]).outdl, FMVOL_SFTBIT
-		mov	eax, ebx				;
-		sar	(opngen_t ptr [edi]).outdr, FMVOL_SFTBIT
-		sub	ebx, edx				;(u)
-		jbe	og_nextsamp				;(v)
-		mov	eax, edx				;(u)
-		mov	(opngen_t ptr [edi]).calcremain, ebx	;(v)
-		imul	eax, (opngen_t ptr [edi]).outdl		;(uv)
-		add	OPN_SAMPL, eax				;
-		imul	edx, (opngen_t ptr [edi]).outdr		;(uv)
-		add	OPN_SAMPR, edx				;(u)
-	  .until	0					;(v)
+		mov	eax, opngen.outdc		;(u)	1
+		mov	esi, opngen.outdl		;(v)	1
+		mov	edi, opngen.outdr		;(u)	1
+		add	esi, eax			;(v)	1
+		sar	esi, FMVOL_SFTBIT		;(np)	-
+		add	edi, eax			;(u)	1
+		mov	ebx, opngen.calcremain		;(v)	1
+		sar	edi, FMVOL_SFTBIT		;(np)	-
+		mov	edx, opncfg.calc1024		;(u)	1
+		mov	eax, ebx			;(v)	1
+		mov	opngen.outdl,esi		;(u)	2
+		sub	ebx, edx			;(v)	1
+		mov	opngen.outdr,edi		;(u)	2
+		jbe	og_nextsamp			;(v)	1
+		mov	eax, edx			;(u)	1
+		mov	opngen.calcremain, ebx		;(v)	2
+		imul	eax, esi			;(np)	1
+		add	OPN_SAMPL, eax			;	2
+		xor	ecx,ecx				;	1
+		imul	edx, edi			;(np)	1
+		add	OPN_SAMPR, edx			;(u)	2
+	  .until	0				;(v)	
 og_nextsamp:
-	   mov	ecx, eax					;(u)
-	   neg	ebx						;(v)
-	   imul	eax, (opngen_t ptr [edi]).outdl			;(uv)
-	   add	eax, OPN_SAMPL					;(u)
-	   pop	esi						;(v)
-	   imul	[opncfg].fmvol					;(uv)
-	   mov	eax, (opngen_t ptr [edi]).outdr			;(u)
-	   add	[esi], edx					;(v)
-	   imul	ecx						;(uv)
-	   add	eax, OPN_SAMPR					;(u)
-	   imul	[opncfg].fmvol					;(uv)
-	   add	[esi+4], edx					;(u)
-	   mov	(opngen_t ptr [edi]).calcremain, ebx		;(v)
-	   add	esi, 8						;(u)
-	   dec	OPN_LENG					;(v)
+	   mov	ecx, eax				;(u)	1
+	   imul	eax, esi				;(np)	1
+	   add	eax, OPN_SAMPL				;(u)	2
+	   mov	esi, pcm				;(v)	1
+	   imul	ecx, edi				;(np)	1
+	   add	ecx, OPN_SAMPR				;(u)	2
+	   mov	edi, opncfg.fmvol			;(v)	1
+	   imul	edi					;(np)	3	edx:eax = eax * edi
+	   add	[esi], edx				;(u)	3
+	   mov	eax, ecx				;(v)	1
+	   imul	edi					;(np)	3	edx:eax = eax * edi
+	   add	[esi+4], edx				;(u)	3
+	   neg	ebx					;(v)	1
+	   xor	ecx, ecx				;(u)	1
+	   add	pcm, 8					;(v)	3
+	   mov	opngen.calcremain, ebx			;(u)	2
+	   dec	OPN_LENG				;(v)	2
 	.endw
 
    .endif
 
 og_noupdate:
 	ret	4
+
+;-------------------------------
+	align	16
+
+PhaseChange:
+	;フェーズ チェンジ
+	mov	dl, (slot_t ptr [edi]).env_mode
+	.if		(dl == EM_ATTACK)		;AR(4)
+		mov	(slot_t ptr [edi]).env_mode, EM_DECAY1	;(u)	2
+		mov	eax, (slot_t ptr [edi]).decaylevel	;(v)	1
+		mov	edx, (slot_t ptr [edi]).env_inc_decay1	;(u)	1
+		mov	(slot_t ptr [edi]).env_end, eax		;(v)	2
+		mov	(slot_t ptr [edi]).env_inc, edx		;(u)	2
+		mov	eax, EC_DECAY				;(v)	1
+		jmp	PhaseChangeEndPoint			;(v)	1
+	.elseif		(dl == EM_DECAY1)		;DR(3)
+		mov	(slot_t ptr [edi]).env_mode, EM_DECAY2	;(u)	2
+		mov	edx, (slot_t ptr [edi]).env_inc_decay2	;(v)	1
+		mov	(slot_t ptr [edi]).env_end, EC_OFF	;(u)	2
+		mov	(slot_t ptr [edi]).env_inc, edx		;(v)	2
+		mov	eax, (slot_t ptr [edi]).decaylevel	;(u)	1
+		jmp	PhaseChangeEndPoint			;(v)	1
+	.else						;SR(2) & RR(1) % OFF(0)
+		.if	(dl == EM_RELEASE)
+		  mov	(slot_t ptr [edi]).env_mode, EM_OFF	;(u)	2
+		.endif
+		and	(ch_t ptr [esi - ch_t_off]).playing, ch	;(v)	3
+		mov	eax,EC_OFF + 1				;(u)	1
+		xor	edx,edx					;(v)	1	EC_ATTACK
+		mov	(slot_t ptr [edi]).env_end, eax		;(u)	2
+		mov	(slot_t ptr [edi]).env_inc, edx		;(v)	2
+		dec	eax					;(u)	1
+		jmp	PhaseChangeEndPoint			;(v)	1
+	.endif
 
 @opngen_getpcm@12	endp
 
@@ -405,14 +437,14 @@ og_noupdate:
 ;	esi	chの構造体
 ;	edi	slotの構造体
 ;===============================================================
-;				align	16
+	align	16
 @opngen_getpcmvr@12	proc	near	syscall	public	uses	ebx esi edi,
 	OPNV_LENG:DWORD
 	;Local変数
 	local	OPNV_SAMPL	:DWORD
 	local	OPNV_SAMPR	:DWORD
 
-	.if	([opncfg].vr_en == 0)
+	.if	(opncfg.vr_en == 0)
 		invoke	@opngen_getpcm@12	,OPNV_LENG
 		jmp	ogv_noupdate
 	.endif
@@ -421,28 +453,28 @@ og_noupdate:
 	je	ogv_noupdate
 
 		mov	esi, edx
-		mov	ebx, [opngen].calcremain
+		mov	ebx, opngen.calcremain
 
 ogv_fmout_st:	mov	eax, ebx
-		imul	ebx, [opngen].outdl
+		imul	ebx, opngen.outdl
 		mov	OPNV_SAMPL, ebx
 		mov	ebx, FMDIV_ENT
 		sub	ebx, eax
-		imul	eax, [opngen].outdr
+		imul	eax, opngen.outdr
 		mov	OPNV_SAMPR, eax
 		push	esi
 
 ogv_fmout_lp:	xor	eax, eax
-		mov	[opngen].calcremain, ebx
-		mov	[opngen].outdl, eax
-		mov	[opngen].outdc, eax
-		mov	[opngen].outdr, eax
-		mov	ch, byte ptr [opngen].playchannels
+		mov	opngen.calcremain, ebx
+		mov	opngen.outdl, eax
+		mov	opngen.outdc, eax
+		mov	opngen.outdr, eax
+		mov	ch, byte ptr opngen.playchannels
 		lea	edi, [opnch]
 ogv_calcch_lp:	xor	eax, eax
-		mov	[opngen].feedback2, eax
-		mov	[opngen].feedback3, eax
-		mov	[opngen].feedback4, eax
+		mov	opngen.feedback2, eax
+		mov	opngen.feedback3, eax
+		mov	opngen.feedback4, eax
 		lea	esi, ch_t ptr [edi]
 		calcenv	1		; slot1 calculate
 		jl	ogv_calcslot3
@@ -461,30 +493,30 @@ ogv_nofeed:	xor	eax, eax			; without feedback
 		op_out
 ogv_algchk:	cmp	(ch_t ptr [esi]).algorithm, 5
 		jne	ogv_calcalg5
-		mov	[opngen].feedback2, eax	; case ALG == 5
-		mov	[opngen].feedback3, eax
-		mov	[opngen].feedback4, eax
+		mov	opngen.feedback2, eax	; case ALG == 5
+		mov	opngen.feedback3, eax
+		mov	opngen.feedback4, eax
 		jmp	ogv_calcslot3
 ogv_calcalg5:	mov	ebx, (ch_t ptr [esi]).connect1	; case ALG != 5
 		add	[ebx], eax
 ogv_calcslot3:	add	edi, sizeof(slot_t)		; slot3 calculate
 		calcenv	2
 		jl	ogv_calcslot2
-		mov	eax, [opngen].feedback2
+		mov	eax, opngen.feedback2
 		op_out
 		mov	ebx, (ch_t ptr [esi]).connect2
 		add	[ebx], eax
 ogv_calcslot2:	add	edi, sizeof(slot_t)		; slot2 calculate
 		calcenv	4
 		jl	ogv_calcslot4
-		mov	eax, [opngen].feedback3
+		mov	eax, opngen.feedback3
 		op_out
 		mov	ebx, (ch_t ptr [esi]).connect3
 		add	[ebx], eax
 ogv_calcslot4:	add	edi, sizeof(slot_t)		; slot4 calculate
 		calcenv	8
 		jl	ogv_calcsloted
-		mov	eax, [opngen].feedback4
+		mov	eax, opngen.feedback4
 		op_out
 		mov	ebx, (ch_t ptr [esi]).connect4
 		add	[ebx], eax
@@ -492,50 +524,50 @@ ogv_calcsloted:	add	edi, (sizeof(ch_t) - (sizeof(slot_t) * 3))
 		dec	ch
 		jne	ogv_calcch_lp
 
-		mov	eax, [opngen].outdl
-		mov	edx, [opngen].outdc
-		imul	eax, [opncfg].vr_l
+		mov	eax, opngen.outdl
+		mov	edx, opngen.outdc
+		imul	eax, opncfg.vr_l
 		mov	ebx, edx
 		sar	eax, 5
 		add	ebx, eax
 		sar	eax, 2
 		add	edx, eax
-		mov	eax, [opngen].outdr
-		imul	eax, [opncfg].vr_r
+		mov	eax, opngen.outdr
+		imul	eax, opncfg.vr_r
 		sar	eax, 5
 		add	edx, eax
 		sar	eax, 2
 		add	ebx, eax
-		add	[opngen].outdl, edx
-		add	[opngen].outdr, ebx
-		sar	[opngen].outdl, FMVOL_SFTBIT
-		sar	[opngen].outdr, FMVOL_SFTBIT
-		mov	edx, [opncfg].calc1024
-		mov	ebx, [opngen].calcremain
+		add	opngen.outdl, edx
+		add	opngen.outdr, ebx
+		sar	opngen.outdl, FMVOL_SFTBIT
+		sar	opngen.outdr, FMVOL_SFTBIT
+		mov	edx, opncfg.calc1024
+		mov	ebx, opngen.calcremain
 		mov	eax, ebx
 		sub	ebx, edx
 		jbe	ogv_nextsamp
-		mov	[opngen].calcremain, ebx
+		mov	opngen.calcremain, ebx
 		mov	eax, edx
-		imul	eax, [opngen].outdl
+		imul	eax, opngen.outdl
 		add	OPNV_SAMPL, eax
-		imul	edx, [opngen].outdr
+		imul	edx, opngen.outdr
 		add	OPNV_SAMPR, edx
 		jmp	ogv_fmout_lp
 ogv_nextsamp:	
 		pop	esi
 		neg	ebx
-		mov	[opngen].calcremain, ebx
+		mov	opngen.calcremain, ebx
 		mov	ecx, eax
-		imul	eax, [opngen].outdl
+		imul	eax, opngen.outdl
 		add	eax, OPNV_SAMPL
-		imul	[opncfg].fmvol
+		imul	opncfg.fmvol
 
 		add	[esi], edx
-		mov	eax, [opngen].outdr
+		mov	eax, opngen.outdr
 		imul	ecx
 		add	eax, OPNV_SAMPR
-		imul	[opncfg].fmvol
+		imul	opncfg.fmvol
 		add	[esi+4], edx
 		add	esi, 8
 		dec	OPNV_LENG

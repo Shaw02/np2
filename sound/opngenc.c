@@ -134,10 +134,10 @@ void opngen_initialize(UINT rate) {
 	//◆Envlop table
 	for (i=0; i<EVC_ENT; i++) {				// 0x0000 ～ 0x01FF
 		pom = pow(((double)(EVC_ENT-1-i)/EVC_ENT), 8) * EVC_ENT;
-		opncfg.envcurve[i] = (long)pom;								// 0x0000～0x03FF : ((511-i/512)^8) * 512
+		opncfg.envcurve[i] = (long)pom;								// 0x0000～0x03FF : ((1023-i/1024)^8) * 1024
 		opncfg.envcurve[EVC_ENT + i] = i;							// 0x0400～0x07FF : i
 	}
-	opncfg.envcurve[EVC_ENT*2] = EVC_ENT;							// 0x0800         : 512
+	opncfg.envcurve[EVC_ENT*2] = EVC_ENT;							// 0x0800         : 1024
 
 	//------------------
 	//◆
@@ -226,7 +226,7 @@ void opngen_setvol(UINT vol) {
 }
 
 //==============================================================
-//			
+//			OPN	Pan
 //--------------------------------------------------------------
 //	◆引数
 //			
@@ -251,7 +251,81 @@ void opngen_setVR(REG8 channel, REG8 value) {
 // ----
 
 //==============================================================
+//			エンベロープ形状の反映
+//--------------------------------------------------------------
+//	◆引数
 //			
+//	◆返り値
+//			
+//	◆備考
+//			
+//==============================================================
+void	Envlop_update(OPNSLOT *slot)
+{
+	SINT32	iRate;
+
+	switch(slot->env_mode){
+		case(EM_ATTACK):	//AR中に相当
+			iRate = slot->env_inc_attack;
+			break;
+		case(EM_DECAY1):	//DR中に相当？
+		case(EM_DECAY2):	//SR中に相当？
+			if(slot->env_cnt < slot->decaylevel){
+				slot->env_mode	= EM_DECAY1;
+				slot->env_end	= slot->decaylevel;
+				iRate			= slot->env_inc_decay1;
+			} else {
+				slot->env_mode	= EM_DECAY2;
+				slot->env_end	= EC_OFF;
+				iRate			= slot->env_inc_decay2;
+			}
+			break;
+		case(EM_RELEASE):	//RR中に相当
+			iRate = slot->env_inc_release;
+			break;
+		default:			//EM_OFF
+			iRate = 0;
+			break;
+	}
+	slot->env_inc = iRate;		//ここで入れた方が、最適化してくれている。
+}
+
+//==============================================================
+//			KeyScaleと音程による、エンベロープ形状の更新
+//--------------------------------------------------------------
+//	◆引数
+//			
+//	◆返り値
+//			
+//	◆備考
+//			Key Scale等により、エンベロープ形状を更新する。
+//==============================================================
+static void channleupdate(OPNCH *ch) {
+
+	int		i;
+	int		s;
+	UINT	evr;
+	OPNSLOT	*slot = ch->slot;
+	UINT8	kc;
+
+	for (i=0; i<4; i++, slot++) {
+		s = ((ch->extop)? extendslot[i] : 0);
+		kc = ch->kcode[s];
+		slot->freq_inc = (ch->keynote[s] + slot->detune1[kc]) * slot->multiple;
+		evr = kc >> slot->keyscale;
+		if (slot->envratio != evr) {
+			slot->envratio = evr;
+			slot->env_inc_attack = slot->attack[evr];
+			slot->env_inc_decay1 = slot->decay1[evr];
+			slot->env_inc_decay2 = ((slot->ssgeg1)? 0 : slot->decay2[evr] );
+			slot->env_inc_release = slot->release[evr];
+			Envlop_update(slot);	//更新があったら、エンベロープを更新
+		}
+	}
+}
+
+//==============================================================
+//			OPN	AL
 //--------------------------------------------------------------
 //	◆引数
 //			
@@ -278,56 +352,56 @@ static void set_algorithm(OPNCH *ch) {
 		}
 	}
 	switch(ch->algorithm) {
-		case 0:
+		case 0:		// [1] - [2] - [3] - [4]
 			ch->connect1 = &opngen.feedback2;
 			ch->connect2 = &opngen.feedback3;
 			ch->connect3 = &opngen.feedback4;
 			outslot = 0x08;
 			break;
 
-		case 1:
+		case 1:		// ([1] + [2]) - [3] - [4]
 			ch->connect1 = &opngen.feedback3;
 			ch->connect2 = &opngen.feedback3;
 			ch->connect3 = &opngen.feedback4;
 			outslot = 0x08;
 			break;
 
-		case 2:
+		case 2:		//	([1] + ([2] - [3])) - [4]
 			ch->connect1 = &opngen.feedback4;
 			ch->connect2 = &opngen.feedback3;
 			ch->connect3 = &opngen.feedback4;
 			outslot = 0x08;
 			break;
 
-		case 3:
+		case 3:		//	(([1] - [2]) + (3)] - [4]
 			ch->connect1 = &opngen.feedback2;
 			ch->connect2 = &opngen.feedback4;
 			ch->connect3 = &opngen.feedback4;
 			outslot = 0x08;
 			break;
 
-		case 4:
+		case 4:		//	(([1] - [2]) + ([3] - [4]))
 			ch->connect1 = &opngen.feedback2;
 			ch->connect2 = outd;
 			ch->connect3 = &opngen.feedback4;
 			outslot = 0x0a;
 			break;
 
-		case 5:
+		case 5:		//	[1] - ([2] + [3] + [4])
 			ch->connect1 = 0;
 			ch->connect2 = outd;
 			ch->connect3 = outd;
 			outslot = 0x0e;
 			break;
 
-		case 6:
+		case 6:		// ([1] - [2]) + [3] + [4]
 			ch->connect1 = &opngen.feedback2;
 			ch->connect2 = outd;
 			ch->connect3 = outd;
 			outslot = 0x0e;
 			break;
 
-		case 7:
+		case 7:		//	[1] + [2] + [3] + [4]
 		default:
 			ch->connect1 = outd;
 			ch->connect2 = outd;
@@ -339,7 +413,7 @@ static void set_algorithm(OPNCH *ch) {
 }
 
 //==============================================================
-//			
+//			OPN	DT & ML
 //--------------------------------------------------------------
 //	◆引数
 //			
@@ -355,7 +429,7 @@ static void set_dt1_mul(OPNSLOT *slot, REG8 value) {
 }
 
 //==============================================================
-//			
+//			OPN	TL
 //--------------------------------------------------------------
 //	◆引数
 //			
@@ -374,7 +448,7 @@ static void set_tl(OPNSLOT *slot, REG8 value) {
 }
 
 //==============================================================
-//			
+//			OPN KS & AL
 //--------------------------------------------------------------
 //	◆引数
 //			
@@ -395,7 +469,7 @@ static void set_ks_ar(OPNSLOT *slot, REG8 value) {
 }
 
 //==============================================================
-//			
+//			OPN	DR
 //--------------------------------------------------------------
 //	◆引数
 //			
@@ -415,7 +489,7 @@ static void set_d1r(OPNSLOT *slot, REG8 value) {
 }
 
 //==============================================================
-//			
+//			OPN	DT & SR
 //--------------------------------------------------------------
 //	◆引数
 //			
@@ -428,19 +502,13 @@ static void set_dt2_d2r(OPNSLOT *slot, REG8 value) {
 
 	value &= 0x1f;
 	slot->decay2 = (value)?(decaytable + (value << 1)):nulltable;
-	if (slot->ssgeg1) {
-		slot->env_inc_decay2 = 0;
-	}
-	else {
-		slot->env_inc_decay2 = slot->decay2[slot->envratio];
-	}
+	slot->env_inc_decay2 = ((slot->ssgeg1==1)? 0 : slot->decay2[slot->envratio] );
 	if (slot->env_mode == EM_DECAY2) {
 		slot->env_inc = slot->env_inc_decay2;
 	}
 }
-
 //==============================================================
-//			
+//			OPN	DL & RR
 //--------------------------------------------------------------
 //	◆引数
 //			
@@ -454,15 +522,7 @@ static void set_d1l_rr(OPNSLOT *slot, REG8 value) {
 	slot->decaylevel = decayleveltable[(value >> 4)];
 	slot->release = decaytable + ((value & 0x0f) << 2) + 2;
 	slot->env_inc_release = slot->release[slot->envratio];
-	if (slot->env_mode == EM_RELEASE) {
-		slot->env_inc = slot->env_inc_release;
-//		if (value == 0xff) {
-//			slot->env_mode = EM_OFF;
-//			slot->env_cnt = EC_OFF;
-//			slot->env_end = EC_OFF + 1;
-//			slot->env_inc = 0;
-//		}
-	}
+	Envlop_update(slot);	//SL, RRの変更なので、こっちを使う。
 }
 
 //==============================================================
@@ -490,57 +550,6 @@ static void set_ssgeg(OPNSLOT *slot, REG8 value) {
 		slot->env_inc = slot->env_inc_decay2;
 	}
 }
-
-//==============================================================
-//			
-//--------------------------------------------------------------
-//	◆引数
-//			
-//	◆返り値
-//			
-//	◆備考
-//			
-//==============================================================
-static void channleupdate(OPNCH *ch) {
-
-	int		i;
-	UINT32	fc = ch->keynote[0];						// ver0.27
-	UINT8	kc = ch->kcode[0];
-	UINT	evr;
-	OPNSLOT	*slot;
-	int		s;
-
-	slot = ch->slot;
-	if (!(ch->extop)) {
-		for (i=0; i<4; i++, slot++) {
-			slot->freq_inc = (fc + slot->detune1[kc]) * slot->multiple;
-			evr = kc >> slot->keyscale;
-			if (slot->envratio != evr) {
-				slot->envratio = evr;
-				slot->env_inc_attack = slot->attack[evr];
-				slot->env_inc_decay1 = slot->decay1[evr];
-				slot->env_inc_decay2 = slot->decay2[evr];
-				slot->env_inc_release = slot->release[evr];
-			}
-		}
-	}
-	else {
-		for (i=0; i<4; i++, slot++) {
-			s = extendslot[i];
-			slot->freq_inc = (ch->keynote[s] + slot->detune1[ch->kcode[s]])
-														* slot->multiple;
-			evr = ch->kcode[s] >> slot->keyscale;
-			if (slot->envratio != evr) {
-				slot->envratio = evr;
-				slot->env_inc_attack = slot->attack[evr];
-				slot->env_inc_decay1 = slot->decay1[evr];
-				slot->env_inc_decay2 = slot->decay2[evr];
-				slot->env_inc_release = slot->release[evr];
-			}
-		}
-	}
-}
-
 
 // ----
 
@@ -674,7 +683,7 @@ void opngen_setreg(REG8 chbase, UINT reg, REG8 value) {
 	if (reg < 0xa0) {
 		slot = ch->slot + fmslot[(reg >> 2) & 3];
 		switch(reg & 0xf0) {
-			case 0x30:					// DT1 MUL
+			case 0x30:					// DT1 & MUL
 				set_dt1_mul(slot, value);
 				channleupdate(ch);
 				break;
@@ -683,25 +692,25 @@ void opngen_setreg(REG8 chbase, UINT reg, REG8 value) {
 				set_tl(slot, value);
 				break;
 
-			case 0x50:					// KS AR
+			case 0x50:					// KS & AR
 				set_ks_ar(slot, value);
 				channleupdate(ch);
 				break;
 
-			case 0x60:					// D1R
+			case 0x60:					// AMON & DR
 				set_d1r(slot, value);
 				break;
 
-			case 0x70:					// DT2 D2R
+			case 0x70:					// DT2 SR
 				set_dt2_d2r(slot, value);
 				channleupdate(ch);
 				break;
 
-			case 0x80:					// D1L RR
+			case 0x80:					// SL RR
 				set_d1l_rr(slot, value);
 				break;
 
-			case 0x90:
+			case 0x90:					// SSG-EG
 				set_ssgeg(slot, value);
 				channleupdate(ch);
 				break;
@@ -709,35 +718,35 @@ void opngen_setreg(REG8 chbase, UINT reg, REG8 value) {
 	}
 	else {
 		switch(reg & 0xfc) {
-			case 0xa0:
+			case 0xa0:					// F-num 1
 				blk = ch->keyfunc[0] >> 3;
 				fn = ((ch->keyfunc[0] & 7) << 8) + value;
 				ch->kcode[0] = (blk << 2) | kftable[fn >> 7];
 //				ch->keynote[0] = fn * opmbaserate / (1L << (22-blk));
 				ch->keynote[0] = (fn << (opncfg.ratebit + blk)) >> 6;
-				channleupdate(ch);
+				channleupdate(ch);		//Key Scale によるエンベロープ形状の更新
 				break;
 
-			case 0xa4:
+			case 0xa4:					// Block & F-num 2
 				ch->keyfunc[0] = value & 0x3f;
 				break;
 
-			case 0xa8:
+			case 0xa8:					// Ch3 F-num 1
 				ch = opnch + chbase + 2;
 				blk = ch->keyfunc[chpos+1] >> 3;
 				fn = ((ch->keyfunc[chpos+1] & 7) << 8) + value;
 				ch->kcode[chpos+1] = (blk << 2) | kftable[fn >> 7];
 //				ch->keynote[chpos+1] = fn * opmbaserate / (1L << (22-blk));
 				ch->keynote[chpos+1] = (fn << (opncfg.ratebit + blk)) >> 6;
-				channleupdate(ch);
+				channleupdate(ch);		//Key Scale によるエンベロープ形状の更新
 				break;
 
-			case 0xac:
+			case 0xac:					// Ch3 Block & F-num 2
 				ch = opnch + chbase + 2;
 				ch->keyfunc[chpos+1] = value & 0x3f;
 				break;
 
-			case 0xb0:
+			case 0xb0:					//FB & AL
 
 				//エンベロープ初期化
 				slot = ch->slot;
@@ -768,7 +777,7 @@ void opngen_setreg(REG8 chbase, UINT reg, REG8 value) {
 				set_algorithm(ch);
 				break;
 
-			case 0xb4:
+			case 0xb4:				//AMS & PMS
 				ch->pan = (UINT8)(value & 0xc0);
 				set_algorithm(ch);
 				break;
@@ -814,7 +823,9 @@ void opngen_keyon(UINT chnum, REG8 value) {
 				slot->env_mode = EM_ATTACK;
 				slot->env_end = EC_DECAY;
 				slot->env_inc = slot->env_inc_attack;
-				if(iEnv==0) {
+				if(iEnv>=EVC_ENT) {
+					slot->env_cnt  = EC_ATTACK;
+				} else if(iEnv<=0) {
 					slot->env_cnt  = EC_DECAY;
 				} else {
 					slot->env_cnt = (long)((EVC_ENT-1 -sqrt(EVC_ENT*sqrt(EVC_ENT*sqrt(EVC_ENT*iEnv)))) * (1 << ENV_BITS));
