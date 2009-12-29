@@ -18,10 +18,11 @@
 
 
 	OPNCFG	opncfg;
-#ifdef OPNGENX86
-	char	envshift[EVC_ENT];
-	char	sinshift[SIN_ENT];
-#endif
+//これは、１次キャッシュの効率を上げるために、OPNCFG構造体の中にする。
+//#ifdef OPNGENX86
+//	char	envshift[EVC_ENT];
+//	char	sinshift[SIN_ENT];
+//#endif
 
 
 static	SINT32	detunetable[8][32];
@@ -31,13 +32,13 @@ static	SINT32	decaytable[94];
 static const SINT32	decayleveltable[16] = {
 		 			SC( 0),SC( 1),SC( 2),SC( 3),SC( 4),SC( 5),SC( 6),SC( 7),
 		 			SC( 8),SC( 9),SC(10),SC(11),SC(12),SC(13),SC(14),SC(31)};
-static const UINT8 multipletable[] = {
+static const UINT32	multipletable[] = {									//32bitの配列にした方がペナルティーが無い。
 			    	1, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30};
 static const SINT32 nulltable[] = {
 					0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 					0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
-static const UINT8 kftable[16] = {0,0,0,0,0,0,0,1,2,3,3,3,3,3,3,3};
-static const UINT8 dttable[] = {
+static const UINT32 kftable[16] = {0,0,0,0,0,0,0,1,2,3,3,3,3,3,3,3};	//32bitの配列にした方がペナルティーが無い。
+static const UINT32	dttable[] = {										//32bitの配列にした方がペナルティーが無い。
 					0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 					0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 					0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2,
@@ -94,7 +95,7 @@ void opngen_initialize(UINT rate) {
 		while(sft < (ENVTBL_BIT + 8)) {
 			pom = (double)(1 << sft) / pow(10.0, EG_STEP*(EVC_ENT-i)/20.0);
 			opncfg.envtable[i] = (long)pom;
-			envshift[i] = sft - TL_BITS;
+			opncfg.envshift[i] = sft - TL_BITS;
 			if (opncfg.envtable[i] >= (1 << (ENVTBL_BIT - 1))) {
 				break;
 			}
@@ -115,7 +116,7 @@ void opngen_initialize(UINT rate) {
 		while(sft < (SINTBL_BIT + 8)) {
 			pom = (double)(1 << sft) * sin(2*PI*i/SIN_ENT);
 			opncfg.sintable[i] = (long)pom;
-			sinshift[i] = sft;
+			opncfg.sinshift[i] = sft;
 			if (opncfg.sintable[i] >= (1 << (SINTBL_BIT - 1))) {
 				break;
 			}
@@ -336,10 +337,12 @@ static void channleupdate(OPNCH *ch) {
 //==============================================================
 static void set_algorithm(OPNCH *ch) {
 
-	SINT32	*outd;
+	SINT32	*outd;			//出力先
+	SINT32	*cn1;			
+	SINT32	*cn2;			
+	SINT32	*cn3;			//一旦、変数に入れたほうが、頭の良い機械語を生成するみたい。
 	UINT8	outslot;
 
-	outd = &opngen.outdc;
 	if (ch->stereo) {
 		switch(ch->pan & 0xc0) {
 			case 0x80:
@@ -349,65 +352,77 @@ static void set_algorithm(OPNCH *ch) {
 			case 0x40:
 				outd = &opngen.outdr;
 				break;
+			default:
+				outd = &opngen.outdc;
+				break;
 		}
+	} else {
+		outd = &opngen.outdc;
 	}
+
 	switch(ch->algorithm) {
 		case 0:		// [1] - [2] - [3] - [4]
-			ch->connect1 = &opngen.feedback2;
-			ch->connect2 = &opngen.feedback3;
-			ch->connect3 = &opngen.feedback4;
+			cn1 = &opngen.feedback2;
+			cn2 = &opngen.feedback3;
+			cn3 = &opngen.feedback4;
 			outslot = 0x08;
 			break;
 
 		case 1:		// ([1] + [2]) - [3] - [4]
-			ch->connect1 = &opngen.feedback3;
-			ch->connect2 = &opngen.feedback3;
-			ch->connect3 = &opngen.feedback4;
+			cn1 = &opngen.feedback3;
+			cn2 = &opngen.feedback3;
+			cn3 = &opngen.feedback4;
 			outslot = 0x08;
 			break;
 
 		case 2:		//	([1] + ([2] - [3])) - [4]
-			ch->connect1 = &opngen.feedback4;
-			ch->connect2 = &opngen.feedback3;
-			ch->connect3 = &opngen.feedback4;
+			cn1 = &opngen.feedback4;
+			cn2 = &opngen.feedback3;
+			cn3 = &opngen.feedback4;
 			outslot = 0x08;
 			break;
 
 		case 3:		//	(([1] - [2]) + (3)] - [4]
-			ch->connect1 = &opngen.feedback2;
-			ch->connect2 = &opngen.feedback4;
-			ch->connect3 = &opngen.feedback4;
+			cn1 = &opngen.feedback2;
+			cn2 = &opngen.feedback4;
+			cn3 = &opngen.feedback4;
 			outslot = 0x08;
 			break;
 
 		case 4:		//	(([1] - [2]) + ([3] - [4]))
-			ch->connect1 = &opngen.feedback2;
-			ch->connect2 = outd;
-			ch->connect3 = &opngen.feedback4;
+			cn1 = &opngen.feedback2;
+			cn2 = outd;
+			cn3 = &opngen.feedback4;
 			outslot = 0x0a;
 			break;
 
 		case 5:		//	[1] - ([2] + [3] + [4])
-			ch->connect1 = 0;
-			ch->connect2 = outd;
-			ch->connect3 = outd;
+			cn1 = 0;
+			cn2 = outd;
+			cn3 = outd;
 			outslot = 0x0e;
 			break;
 
 		case 6:		// ([1] - [2]) + [3] + [4]
-			ch->connect1 = &opngen.feedback2;
-			ch->connect2 = outd;
-			ch->connect3 = outd;
+			cn1 = &opngen.feedback2;
+			cn2 = outd;
+			cn3 = outd;
 			outslot = 0x0e;
 			break;
 
 		case 7:		//	[1] + [2] + [3] + [4]
 		default:
-			ch->connect1 = outd;
-			ch->connect2 = outd;
-			ch->connect3 = outd;
+			cn1 = outd;
+			cn2 = outd;
+			cn3 = outd;
 			outslot = 0x0f;
 	}
+
+	//ここで、一括で入れる。
+	//簡単なオペコードを生成させるする事で、プリフェッチのデコーダーへのスループットを上げる。
+	ch->connect1 = cn1;
+	ch->connect2 = cn2;
+	ch->connect3 = cn3;
 	ch->connect4 = outd;
 	ch->outslot = outslot;
 }

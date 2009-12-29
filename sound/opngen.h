@@ -151,9 +151,13 @@ typedef struct {
 	SINT32	vr_l;
 	SINT32	vr_r;
 
+	SINT32	envcurve[EVC_ENT*2 + 1];
 	SINT32	sintable[SIN_ENT];
 	SINT32	envtable[EVC_ENT];
-	SINT32	envcurve[EVC_ENT*2 + 1];
+#ifdef OPNGENX86
+	char	sinshift[SIN_ENT];
+	char	envshift[EVC_ENT];
+#endif
 } OPNCFG;
 
 

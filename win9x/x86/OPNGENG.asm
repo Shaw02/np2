@@ -108,9 +108,11 @@ ratebit			dd	?
 vr_en			dd	?
 vr_l			dd	?
 vr_r			dd	?
+envcurve		dd	(EVC_ENT*2 + 1)	dup(?)
 sintable		dd	SIN_ENT		dup(?)
 envtable		dd	EVC_ENT		dup(?)
-envcurve		dd	(EVC_ENT*2 + 1)	dup(?)
+sinshift		db	SIN_ENT		dup(?)
+envshift		db	EVC_ENT		dup(?)
 opncfg_t		ends
 
 ;---------------
@@ -120,8 +122,8 @@ opncfg_t		ends
 	extern	C	opnch	:ch_t			;FM音源の構造体
 	extern	C	opncfg	:opncfg_t		
 
-	extern	C	sinshift:byte
-	extern	C	envshift:byte
+;	extern	C	sinshift:byte
+;	extern	C	envshift:byte
 
 ;ENVCURVE	equ	(opncfg + opncfg_t.envcurve)
 ;SINTABLE	equ	(opncfg + opncfg_t.sintable)
@@ -130,8 +132,8 @@ opncfg_t		ends
 ;---------------
 ;プロトタイプ宣言
 
-@opngen_getpcm@12	proto	near	syscall,	ptStream:DWORD
-@opngen_getpcmvr@12	proto	near	syscall,	ptStream:DWORD
+opngen_getpcm	proto	near	stdcall,	hdl:ptr byte, buf:ptr DWORD, OPN_LENG:DWORD
+opngen_getpcmvr	proto	near	stdcall,	hdl:ptr byte, buf:ptr DWORD, OPN_LENG:DWORD
 
 .code
 
@@ -149,12 +151,15 @@ opncfg_t		ends
 ;	edi	ch->slot
 ;===============================================================
 op_out	macro
-	add	eax, (slot_t ptr [edi]).freq_cnt	;(u)	2
-	mov	cl, envshift[edx]			;(v)	1
+
+	assume	edi:ptr slot_t
+
+	add	eax, [edi].freq_cnt			;(u)	2
+	mov	cl, opncfg.envshift[edx]		;(v)	1
 	shr	eax, (FREQ_BITS - SIN_BITS)		;(u)		shrはu-pipe限定
 	mov	edx, opncfg.envtable[edx*4]		;(v)	1
 	and	eax, (SIN_ENT - 1)			;(u)	1
-	add	cl, sinshift[eax]			;(v)	2
+	add	cl, opncfg.sinshift[eax]		;(v)	2
 	mov	eax, opncfg.sintable[eax*4]		;(u)	1
 	imul	eax, edx				;(np)	1	ペアリング不可
 	sar	eax, cl					;(np)		ペアリング不可
@@ -172,46 +177,48 @@ op_out	macro
 ;===============================================================
 calcenv	macro	p3
 							;()内は、CPU(586以降)のpipe。
+	assume	edi:ptr slot_t
+
 	;Freqency & Envlop
-	mov	eax, (slot_t ptr [edi]).env_cnt		;(u)	1
-	mov	edx, (slot_t ptr [edi]).freq_inc	;(v)	1
-	add	eax, (slot_t ptr [edi]).env_inc		;(u)	2
-	add	(slot_t ptr [edi]).freq_cnt, edx	;(v)	3
+	mov	eax, [edi].env_cnt		;(u)	1
+	mov	edx, [edi].freq_inc		;(v)	1
+	add	eax, [edi].env_inc		;(u)	2
+	add	[edi].freq_cnt, edx		;(v)	3
 
 	;フェーズ チェンジ
-	.if	( eax >= dword ptr (slot_t ptr [edi]).env_end )
-	   mov	dl, (slot_t ptr [edi]).env_mode
+	.if	( eax >= dword ptr [edi].env_end )
+	   mov	dl, [edi].env_mode
 	   .if		(dl == EM_ATTACK)		;AR(4)
-		mov	(slot_t ptr [edi]).env_mode, EM_DECAY1	;(u)	2
-		mov	eax, (slot_t ptr [edi]).decaylevel	;(v)	1
-		mov	edx, (slot_t ptr [edi]).env_inc_decay1	;(u)	1
-		mov	(slot_t ptr [edi]).env_end, eax		;(v)	2
-		mov	(slot_t ptr [edi]).env_inc, edx		;(u)	2
+		mov	[edi].env_mode, EM_DECAY1	;(u)	2
+		mov	eax, [edi].decaylevel		;(v)	1
+		mov	edx, [edi].env_inc_decay1	;(u)	1
+		mov	[edi].env_end, eax		;(v)	2
+		mov	[edi].env_inc, edx		;(u)	2
 		mov	eax, EC_DECAY				;(v)	1
 	   .elseif	(dl == EM_DECAY1)		;DR(3)
-		mov	(slot_t ptr [edi]).env_mode, EM_DECAY2	;(u)	2
-		mov	edx, (slot_t ptr [edi]).env_inc_decay2	;(v)	1
-		mov	(slot_t ptr [edi]).env_end, EC_OFF	;(u)	2
-		mov	(slot_t ptr [edi]).env_inc, edx		;(v)	2
-		mov	eax, (slot_t ptr [edi]).decaylevel	;(u)	1
+		mov	[edi].env_mode, EM_DECAY2	;(u)	2
+		mov	edx, [edi].env_inc_decay2	;(v)	1
+		mov	[edi].env_end, EC_OFF		;(u)	2
+		mov	[edi].env_inc, edx		;(v)	2
+		mov	eax, [edi].decaylevel		;(u)	1
 	   .else					;SR(2) & RR(1) % OFF(0)
 		.if	(dl == EM_RELEASE)
-		  mov	(slot_t ptr [edi]).env_mode, EM_OFF	;(u)	2
+		  mov	[edi].env_mode, EM_OFF			;(u)	2
 		.endif
 		and	(ch_t ptr [esi]).playing, (not p3)	;(v)	3
 		mov	eax, EC_OFF +1				;(u)	1	EC_ATTACK
 		xor	edx, edx				;(v)	1
-		mov	(slot_t ptr [edi]).env_end, eax		;(u)	2
-		mov	(slot_t ptr [edi]).env_inc, edx		;(v)	2
+		mov	[edi].env_end, eax			;(u)	2
+		mov	[edi].env_inc, edx			;(v)	2
 		dec	eax					;(u)
 	   .endif
 	.endif
 	;音量計算
-	mov	(slot_t ptr [edi]).env_cnt, eax			;(u)	2
-	mov	edx, (slot_t ptr [edi]).totallevel		;(v)	1
-	shr	eax, ENV_BITS					;(u)		eax >> ENV_BITS
-	sub	edx, opncfg.envcurve[eax*4]			;(u)	2	(直ぐにeaxを使う為、ペアリング不可)
-	endm							;		でも、次は、jl命令(v-pipe)が来ている。
+	mov	[edi].env_cnt, eax			;(u)	2
+	mov	edx, [edi].totallevel			;(v)	1
+	shr	eax, ENV_BITS				;(u)		eax >> ENV_BITS
+	sub	edx, opncfg.envcurve[eax*4]		;(u)	2	(直ぐにeaxを使う為、ペアリング不可)
+	endm						;		でも、次は、jl命令(v-pipe)が来ている。
 ;===============================================================
 ;		
 ;---------------------------------------------------------------
@@ -226,15 +233,15 @@ calcenv	macro	p3
 ;	edi	slotの構造体
 ;===============================================================
 	align	16
-@opngen_getpcm@12	proc	near	syscall	public	uses ebx esi edi,
-	OPN_LENG:DWORD
+opngen_getpcm	proc	near	stdcall	public	uses ebx esi edi,
+		hdl		:ptr BYTE,
+		buf		:ptr DWORD,
+		OPN_LENG	:DWORD
 	;Local変数
 	local	OPN_SAMPL	:DWORD
 	local	OPN_SAMPR	:DWORD
-	local	pcm		:ptr byte
 
-	xor	ecx,ecx				;ecx = 0
-	mov	pcm, edx			;*buf
+	xor	ecx, ecx			;ecx = 0
 
    .if	(dword ptr opngen.playing != ecx)
 
@@ -244,11 +251,11 @@ calcenv	macro	p3
 
 	.while	(OPN_LENG > ecx)
 	   mov	eax, opngen.outdl			;(u)	1
-	   imul	eax,ebx					;(np)	1
+	   imul	eax, ebx				;(np)	1
 	   mov	edx, opngen.outdr			;(u)	1
 	   mov	OPN_SAMPL, eax				;(v)	2	OPN_SAMPL = opngen.outdl * opngen.calcremain
-	   imul	edx,ebx					;(np)	1
-	   mov	eax,ebx					;(u)	1
+	   imul	edx, ebx				;(np)	1
+	   mov	eax, ebx				;(u)	1
 	   mov	OPN_SAMPR, edx				;(u)	2	OPN_SAMPL = opngen.outdr * opngen.calcremain
 	   mov	ebx, FMDIV_ENT				;(v)	1
 	   sub	ebx, eax				;(v)	1	ebx = FMDIV_ENT - opngen.calcremain
@@ -263,6 +270,8 @@ calcenv	macro	p3
 		mov	ecx, opngen.playchannels	;(u)	1
 
 		align	16
+
+		assume	edi:ptr slot_t
 
 		.while	(ecx != 0)				;ch数だけ繰り返す。
 		   mov	al, (ch_t ptr [esi - ch_t_off]).outslot		;出力するslotはKeyOnされているか？
@@ -280,29 +289,29 @@ calcenv	macro	p3
 
 			.repeat					;	jmp命令になる。
 				;Freqency & Envlop
-				mov	eax, (slot_t ptr [edi]).env_cnt		;(u)	1
-				mov	edx, (slot_t ptr [edi]).freq_inc	;(v)	1
-				add	eax, (slot_t ptr [edi]).env_inc		;(u)	2
-				add	(slot_t ptr [edi]).freq_cnt, edx	;(v)	3
-				cmp	eax, dword ptr (slot_t ptr [edi]).env_end	;2
-				jnc	PhaseChange					;1
+				mov	eax, [edi].env_cnt		;(u)	1
+				mov	edx, [edi].freq_inc		;(v)	1
+				add	eax, [edi].env_inc		;(u)	2
+				add	[edi].freq_cnt, edx		;(v)	3
+				cmp	eax, dword ptr [edi].env_end	;2
+				jnc	PhaseChange			;1
 PhaseChangeEndPoint:
-				mov	(slot_t ptr [edi]).env_cnt, eax			;(u)	2
-				mov	edx, (slot_t ptr [edi]).totallevel		;(v)	1
-				shr	eax, ENV_BITS					;(u)		eax >> ENV_BITS
-				sub	edx, opncfg.envcurve[eax*4]			;(u)	2	(直ぐにeaxを使う為、ペアリング不可)
-				jl	og_calcslot3					;(v)	1	条件ジャンプは(v)限定。
+				mov	[edi].env_cnt, eax			;(u)	2
+				mov	edx, [edi].totallevel			;(v)	1
+				shr	eax, ENV_BITS				;(u)		eax >> ENV_BITS
+				sub	edx, opncfg.envcurve[eax*4]		;(u)	2	(直ぐにeaxを使う為、ペアリング不可)
+				jl	og_calcslot3				;(v)	1	条件ジャンプは(v)限定。
 
-				push	ecx						;(u)	4
-				.if	(cl == 0)					;(u→v)
-					mov	ebx,(ch_t ptr [esi - ch_t_off]).op1fb	;(u)	1	with feedback
-					mov	cl, (ch_t ptr [esi - ch_t_off]).feedback;(v)	1	4PI=1 | 2PI=2 | PI=3 | PI/2=4 | PI/4=5 | PI/8=6 | PI/16=7 | Off=0
-					.if	(cl == 0)				;(u→v)
-						xor	eax,eax				;(u)	1
-					.else						;(v)
-						mov	eax,ebx				;(u)	1
-						shr	eax,cl				;(u)	
-					.endif						;(v)
+				push	ecx							;(u)	4
+				.if	(cl == 0)						;(u→v)
+					mov	ebx,(ch_t ptr [esi - ch_t_off]).op1fb		;(u)	1	with feedback
+					mov	cl, (ch_t ptr [esi - ch_t_off]).feedback	;(v)	1	4PI=1 | 2PI=2 | PI=3 | PI/2=4 | PI/4=5 | PI/8=6 | PI/16=7 | Off=0
+					.if	(cl == 0)					;(u→v)
+						xor	eax,eax					;(u)	1
+					.else							;(v)
+						mov	eax,ebx					;(u)	1
+						shr	eax,cl					;(u)	
+					.endif							;(v)
 					op_out
 					mov	(ch_t ptr [esi - ch_t_off]).op1fb, eax		;(u)	2
 					add	eax,ebx						;(v)	1
@@ -311,9 +320,9 @@ PhaseChangeEndPoint:
 						mov	ebx,(ch_t ptr [esi - ch_t_off]).connect1	; case ALG != 5
 						add	[ebx], eax
 					.else
-						mov	opngen.feedback2, eax		;(u)	2	case ALG == 5
-						mov	opngen.feedback3, eax		;(v)	2
-						mov	opngen.feedback4, eax		;(u)	2	i586はこの方が早い
+						mov	opngen.feedback2, eax			;(u)	2	case ALG == 5
+						mov	opngen.feedback3, eax			;(v)	2
+						mov	opngen.feedback4, eax			;(u)	2	i586はこの方が早い
 					.endif
 				.else
 					.if	(cl==1)
@@ -367,7 +376,7 @@ og_nextsamp:
 	   mov	ecx, eax				;(u)	1
 	   imul	eax, esi				;(np)	1
 	   add	eax, OPN_SAMPL				;(u)	2
-	   mov	esi, pcm				;(v)	1
+	   mov	esi, buf				;(v)	1
 	   imul	ecx, edi				;(np)	1
 	   add	ecx, OPN_SAMPR				;(u)	2
 	   mov	edi, opncfg.fmvol			;(v)	1
@@ -378,7 +387,7 @@ og_nextsamp:
 	   add	[esi+4], edx				;(u)	3
 	   neg	ebx					;(v)	1
 	   xor	ecx, ecx				;(u)	1
-	   add	pcm, 8					;(v)	3
+	   add	buf, 8					;(v)	3
 	   mov	opngen.calcremain, ebx			;(u)	2
 	   dec	OPN_LENG				;(v)	2
 	.endw
@@ -386,43 +395,43 @@ og_nextsamp:
    .endif
 
 og_noupdate:
-	ret	4
+	ret
 
 ;-------------------------------
 	align	16
 
 PhaseChange:
 	;フェーズ チェンジ
-	mov	dl, (slot_t ptr [edi]).env_mode
+	mov	dl, [edi].env_mode
 	.if		(dl == EM_ATTACK)		;AR(4)
-		mov	(slot_t ptr [edi]).env_mode, EM_DECAY1	;(u)	2
-		mov	eax, (slot_t ptr [edi]).decaylevel	;(v)	1
-		mov	edx, (slot_t ptr [edi]).env_inc_decay1	;(u)	1
-		mov	(slot_t ptr [edi]).env_end, eax		;(v)	2
-		mov	(slot_t ptr [edi]).env_inc, edx		;(u)	2
+		mov	[edi].env_mode, EM_DECAY1		;(u)	2
+		mov	eax, [edi].decaylevel			;(v)	1
+		mov	edx, [edi].env_inc_decay1		;(u)	1
+		mov	[edi].env_end, eax			;(v)	2
+		mov	[edi].env_inc, edx			;(u)	2
 		mov	eax, EC_DECAY				;(v)	1
 		jmp	PhaseChangeEndPoint			;(v)	1
 	.elseif		(dl == EM_DECAY1)		;DR(3)
-		mov	(slot_t ptr [edi]).env_mode, EM_DECAY2	;(u)	2
-		mov	edx, (slot_t ptr [edi]).env_inc_decay2	;(v)	1
-		mov	(slot_t ptr [edi]).env_end, EC_OFF	;(u)	2
-		mov	(slot_t ptr [edi]).env_inc, edx		;(v)	2
-		mov	eax, (slot_t ptr [edi]).decaylevel	;(u)	1
+		mov	[edi].env_mode, EM_DECAY2		;(u)	2
+		mov	edx, [edi].env_inc_decay2		;(v)	1
+		mov	[edi].env_end, EC_OFF			;(u)	2
+		mov	[edi].env_inc, edx			;(v)	2
+		mov	eax, [edi].decaylevel			;(u)	1
 		jmp	PhaseChangeEndPoint			;(v)	1
 	.else						;SR(2) & RR(1) % OFF(0)
 		.if	(dl == EM_RELEASE)
-		  mov	(slot_t ptr [edi]).env_mode, EM_OFF	;(u)	2
+		  mov	[edi].env_mode, EM_OFF			;(u)	2
 		.endif
 		and	(ch_t ptr [esi - ch_t_off]).playing, ch	;(v)	3
 		mov	eax,EC_OFF + 1				;(u)	1
 		xor	edx,edx					;(v)	1	EC_ATTACK
-		mov	(slot_t ptr [edi]).env_end, eax		;(u)	2
-		mov	(slot_t ptr [edi]).env_inc, edx		;(v)	2
+		mov	[edi].env_end, eax			;(u)	2
+		mov	[edi].env_inc, edx			;(v)	2
 		dec	eax					;(u)	1
 		jmp	PhaseChangeEndPoint			;(v)	1
 	.endif
 
-@opngen_getpcm@12	endp
+opngen_getpcm	endp
 
 ;===============================================================
 ;		
@@ -438,21 +447,23 @@ PhaseChange:
 ;	edi	slotの構造体
 ;===============================================================
 	align	16
-@opngen_getpcmvr@12	proc	near	syscall	public	uses	ebx esi edi,
-	OPNV_LENG:DWORD
+opngen_getpcmvr	proc	near	stdcall	public	uses	ebx esi edi,
+		hdl		:ptr BYTE,
+		buf		:ptr DWORD,
+		OPNV_LENG	:DWORD
 	;Local変数
 	local	OPNV_SAMPL	:DWORD
 	local	OPNV_SAMPR	:DWORD
 
 	.if	(opncfg.vr_en == 0)
-		invoke	@opngen_getpcm@12	,OPNV_LENG
+		invoke	opngen_getpcm	,hdl,buf,OPNV_LENG
 		jmp	ogv_noupdate
 	.endif
 
 	cmp	OPNV_LENG,0
 	je	ogv_noupdate
 
-		mov	esi, edx
+		mov	esi, buf
 		mov	ebx, opngen.calcremain
 
 ogv_fmout_st:	mov	eax, ebx
@@ -573,7 +584,7 @@ ogv_nextsamp:
 		dec	OPNV_LENG
 		jne	ogv_fmout_st
 
-ogv_noupdate:	ret	4
+ogv_noupdate:	ret
 
-@opngen_getpcmvr@12	endp
+opngen_getpcmvr	endp
 	end
