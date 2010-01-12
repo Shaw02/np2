@@ -66,6 +66,7 @@ env_inc_attack		dd	?		; 38
 env_inc_decay1		dd	?		; 3c
 env_inc_decay2		dd	?		; 40
 env_inc_rel		dd	?		; 44
+amon			dd	?		; 48
 slot_t			ends
 
 ch_t			struc	
@@ -85,6 +86,9 @@ kcode			db	4	dup(?)
 pan			db	?
 extop			db	?
 stereo			db	2	dup(?)
+padding2		db	?
+pms			dd	?
+ams			dd	?
 ch_t			ends
 ch_t_off		equ	sizeof(slot_t) * 4
 
@@ -98,6 +102,9 @@ outdl			dd	?
 outdc			dd	?
 outdr			dd	?
 calcremain		dd	?
+lfo_freq_cnt		dd	?	;frequency count
+lfo_freq_inc		dd	?	;frequency step
+lfo_enable		dd	?	;LFO Enable / Disable
 keyreg			db	12	dup(?)
 opngen_t		ends
 
@@ -240,6 +247,8 @@ opngen_getpcm	proc	near	stdcall	public	uses ebx esi edi,
 	;Local変数
 	local	OPN_SAMPL	:DWORD
 	local	OPN_SAMPR	:DWORD
+	local	LFO_Level	:DWORD
+	local	LFO_LevelSft	:BYTE
 
 	xor	ecx, ecx			;ecx = 0
 
@@ -257,7 +266,7 @@ opngen_getpcm	proc	near	stdcall	public	uses ebx esi edi,
 	   imul	edx, ebx				;(np)	1
 	   mov	eax, ebx				;(u)	1
 	   mov	OPN_SAMPR, edx				;(u)	2	OPN_SAMPL = opngen.outdr * opngen.calcremain
-	   mov	ebx, FMDIV_ENT				;(v)	1
+	   mov	ebx, FMDIV_ENT				;(v)	1		(256 = 2^8)
 	   sub	ebx, eax				;(v)	1	ebx = FMDIV_ENT - opngen.calcremain
 
 	   .repeat
@@ -269,11 +278,28 @@ opngen_getpcm	proc	near	stdcall	public	uses ebx esi edi,
 		mov	opngen.calcremain, ebx		;(v)	2
 		mov	ecx, opngen.playchannels	;(u)	1
 
+		;ハードLFO-------------
+		;変位の計算
+		.if	(opngen.lfo_enable & 01h)
+			mov	eax, opngen.lfo_freq_cnt
+			add	eax, opngen.lfo_freq_inc
+			mov	opngen.lfo_freq_cnt, eax
+			mov	cl, opncfg.sinshift[eax]		;(v)	2
+			mov	eax, opncfg.sintable[eax*4]		;(u)	1
+		.else
+			xor	eax, eax
+			xor	ecx, ecx
+		.endif
+		mov	LFO_Level, eax
+		mov	LFO_LevelSft, cl
+		;-----------------------
+
 		align	16
 
 		assume	edi:ptr slot_t
 
-		.while	(ecx != 0)				;ch数だけ繰り返す。
+		;ch数だけ繰り返す。
+		.while	(ecx != 0)
 		   mov	al, (ch_t ptr [esi - ch_t_off]).outslot		;出力するslotはKeyOnされているか？
 		   .if	(al & (byte ptr (ch_t ptr [esi - ch_t_off]).playing))
 			push	ecx				;(u)	4
@@ -287,21 +313,38 @@ opngen_getpcm	proc	near	stdcall	public	uses ebx esi edi,
 
 			align	16
 
+			;slot数だけ繰り返す。
 			.repeat					;	jmp命令になる。
-				;Freqency & Envlop
+				push	ecx
+				;Freqency
+				mov	eax, [edi].freq_inc		;(v)	1
+				mov	ebx, (ch_t ptr [esi - ch_t_off]).pms
+				mov	cl, LFO_LevelSft
+				imul	ebx, LFO_Level
+				imul	ebx
+				sar	edx, cl
+				add	eax, edx
+				add	[edi].freq_cnt, eax		;(v)	3
+
+				;Envlop
 				mov	eax, [edi].env_cnt		;(u)	1
-				mov	edx, [edi].freq_inc		;(v)	1
 				add	eax, [edi].env_inc		;(u)	2
-				add	[edi].freq_cnt, edx		;(v)	3
 				cmp	eax, dword ptr [edi].env_end	;2
 				jnc	PhaseChange			;1
 PhaseChangeEndPoint:
 				mov	[edi].env_cnt, eax			;(u)	2
 				mov	edx, [edi].totallevel			;(v)	1
 				shr	eax, ENV_BITS				;(u)		eax >> ENV_BITS
+				.if	(dword ptr [edi].amon & 01h)
+					mov	ebx, (ch_t ptr [esi - ch_t_off]).ams
+					imul	ebx, LFO_Level
+					sar	ebx, cl
+					add	edx, ebx
+				.endif
 				sub	edx, opncfg.envcurve[eax*4]		;(u)	2	(直ぐにeaxを使う為、ペアリング不可)
 				jl	og_calcslot3				;(v)	1	条件ジャンプは(v)限定。
 
+				pop	ecx
 				push	ecx							;(u)	4
 				.if	(cl == 0)						;(u→v)
 					mov	ebx,(ch_t ptr [esi - ch_t_off]).op1fb		;(u)	1	with feedback
@@ -338,8 +381,8 @@ PhaseChangeEndPoint:
 					op_out
 					add	[ebx], eax	;	1
 				.endif
-				pop	ecx			;(u)	4
 og_calcslot3:
+				pop	ecx			;(u)	4
 				rol	ch,1			;(u)	
 				add	edi, sizeof(slot_t)	;	1
 				inc	cl			;	1
@@ -361,7 +404,7 @@ og_calcslot3:
 		mov	edx, opncfg.calc1024		;(u)	1
 		mov	eax, ebx			;(v)	1
 		mov	opngen.outdl,esi		;(u)	2
-		sub	ebx, edx			;(v)	1
+		sub	ebx, edx			;(v)	1	opngen.calcremain - opncfg.calc1024
 		mov	opngen.outdr,edi		;(u)	2
 		jbe	og_nextsamp			;(v)	1
 		mov	eax, edx			;(u)	1
@@ -373,17 +416,17 @@ og_calcslot3:
 		add	OPN_SAMPR, edx			;(u)	2
 	  .until	0				;(v)	
 og_nextsamp:
-	   mov	ecx, eax				;(u)	1
+	   mov	ecx, eax				;(u)	1	opngen.calcremain
 	   imul	eax, esi				;(np)	1
-	   add	eax, OPN_SAMPL				;(u)	2
+	   add	eax, OPN_SAMPL				;(u)	2	eax = opngen.calcremain * opngen.outdl + OPN_SAMPL
 	   mov	esi, buf				;(v)	1
 	   imul	ecx, edi				;(np)	1
-	   add	ecx, OPN_SAMPR				;(u)	2
+	   add	ecx, OPN_SAMPR				;(u)	2	ecx = opngen.calcremain * opngen.outdr + OPN_SAMPR
 	   mov	edi, opncfg.fmvol			;(v)	1
-	   imul	edi					;(np)	3	edx:eax = eax * edi
+	   imul	edi					;(np)	3	edx:eax = eax * opncfg.fmvol
 	   add	[esi], edx				;(u)	3
 	   mov	eax, ecx				;(v)	1
-	   imul	edi					;(np)	3	edx:eax = eax * edi
+	   imul	edi					;(np)	3	edx:eax = ecx * opncfg.fmvol
 	   add	[esi+4], edx				;(u)	3
 	   neg	ebx					;(v)	1
 	   xor	ecx, ecx				;(u)	1

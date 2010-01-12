@@ -92,7 +92,7 @@ static void IOOUTCALL ymf_o18a(UINT port, REG8 dat) {
 				fmtimer_setreg(addr, dat);
 			}
 		}
-		else if (addr < 0xc0) {
+		else if ((addr < 0xc0) || (addr == 0x22)) {
 			opngen_setreg(0, addr, dat);
 		}
 		opn.reg[addr] = dat;

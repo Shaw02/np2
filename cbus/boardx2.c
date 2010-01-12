@@ -120,7 +120,7 @@ static void IOOUTCALL opna_o18a(UINT port, REG8 dat) {
 				}
 			}
 		}
-		else if (addr < 0xc0) {
+		else if ((addr < 0xc0) || (addr == 0x22)) {
 			opngen_setreg(3, addr, dat);
 		}
 		opn.reg[addr] = dat;

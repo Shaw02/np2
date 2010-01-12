@@ -50,6 +50,25 @@ static const UINT32	dttable[] = {										//32bitの配列にした方がペナルティーが
 static const int extendslot[4] = {2, 3, 1, 0};
 static const int fmslot[4] = {0, 2, 1, 3};
 
+//ハードウェアLFO関連のテーブル
+#if (EVC_BITS >= 7)
+#define	LA(n)	(SINT32)((n/0.75)*(1<<(EVC_BITS - 7)))
+#else
+#define	LA(n)	(SINT32)((n/0.75)*(1<<(7 - EVC_BITS)))
+#endif
+#define	LP(n)	(SINT32)
+       const double lfo_freq[8]			= {3.98, 5.56, 6.02, 6.37, 6.88, 9.63, 48.1, 72.2};	//単位 [Hz]
+       		 SINT32 lfo_freq_table[8]	= {0,0,0,0,0,0,0,0};
+	   const SINT32 lfo_pms_table[8]	= {
+				0x00000000,		// 0 [cent]
+				0x0080D56F,		// 3.4 [cent]	table = (1-(2^(n[cent]/1200))) * 2^32
+				0x00FE1ED5,		// 6.7 [cent]
+				0x017BA56C,		//10 [cent]
+				0x02141EA7,		//14 [cent]
+				0x02F97DDC,		//20 [cent]
+				0x05FBD4D5,		//40 [cent]
+				0x0C1B77B6};	//80 [cent]	MUL freq_inc,この値 を実行して、edxの数値を足す。
+       const SINT32 lfo_ams_table[4]	= {LA(0),LA(1.4),LA(5.9),LA(11.8)};	//[dB]
 
 //==============================================================
 //			
@@ -156,6 +175,10 @@ void opngen_initialize(UINT rate) {
 		opncfg.ratebit = 2 + (FREQ_BITS - 16);
 	}
 
+	//ハードウェアLFOのfreq用テーブルの作成
+	for (i=0; i<7; i++) {
+		lfo_freq_table[i] = (SINT32)((SIN_ENT / ((OPNA_CLOCK / 72) / lfo_freq[i] )) * (1 << opncfg.ratebit));
+	}
 	//------------------
 	//◆
 	for (i=0; i<4; i++) {
@@ -495,6 +518,7 @@ static void set_ks_ar(OPNSLOT *slot, REG8 value) {
 //==============================================================
 static void set_d1r(OPNSLOT *slot, REG8 value) {
 
+	slot->amon = (value & 0x80) >> 7;
 	value &= 0x1f;
 	slot->decay1 = (value)?(decaytable + (value << 1)):nulltable;
 	slot->env_inc_decay1 = slot->decay1[slot->envratio];
@@ -587,7 +611,7 @@ void opngen_reset(void) {
 
 	ZeroMemory(&opngen, sizeof(opngen));
 	ZeroMemory(opnch, sizeof(opnch));
-	opngen.playchannels = 3;
+	opngen.playchannels	= 3;
 
 	ch = opnch;
 	for (i=0; i<OPNCH_MAX; i++) {
@@ -730,8 +754,11 @@ void opngen_setreg(REG8 chbase, UINT reg, REG8 value) {
 				channleupdate(ch);
 				break;
 		}
-	}
-	else {
+	} else if (reg ==0x22) {			// LFO ON & Freq
+		opngen.lfo_enable	= (value & 0x08) >> 3;
+		opngen.lfo_freq_inc	= lfo_freq_table[value & 0x07];
+		opngen.lfo_freq_cnt	= 0;
+	} else {
 		switch(reg & 0xfc) {
 			case 0xa0:					// F-num 1
 				blk = ch->keyfunc[0] >> 3;
@@ -792,7 +819,9 @@ void opngen_setreg(REG8 chbase, UINT reg, REG8 value) {
 				set_algorithm(ch);
 				break;
 
-			case 0xb4:				//AMS & PMS
+			case 0xb4:				//PAN & AMS & PMS
+				ch->pms = lfo_pms_table[ value & 0x07];	
+				ch->ams = lfo_pms_table[(value & 0x30) >> 4];
 				ch->pan = (UINT8)(value & 0xc0);
 				set_algorithm(ch);
 				break;

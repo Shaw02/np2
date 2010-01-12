@@ -107,6 +107,7 @@ const SINT32	*release;			// release ratio
 	SINT32		env_inc_decay1;		// envelope decay1 step
 	SINT32		env_inc_decay2;		// envelope decay2 step
 	SINT32		env_inc_release;	// envelope release step
+	UINT		amon;				// AMON
 } OPNSLOT;
 
 typedef struct {
@@ -127,7 +128,9 @@ typedef struct {
 	UINT8	pan;				// pan
 	UINT8	extop;				// extendopelator-enable
 	UINT8	stereo;				// stereo-enable
-	UINT8	padding2;
+	UINT8	padding2;			//
+	UINT	pms;				//PMS
+	UINT	ams;				//AMS
 } OPNCH;
 
 typedef struct {
@@ -140,6 +143,9 @@ typedef struct {
 	SINT32	outdc;
 	SINT32	outdr;
 	SINT32	calcremain;
+	SINT32	lfo_freq_cnt;			// frequency count
+	SINT32	lfo_freq_inc;			// frequency step
+	UINT	lfo_enable;
 	UINT8	keyreg[OPNCH_MAX];
 } _OPNGEN, *OPNGEN;
 
