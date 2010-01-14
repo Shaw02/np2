@@ -52,22 +52,22 @@ static const int fmslot[4] = {0, 2, 1, 3};
 
 //ハードウェアLFO関連のテーブル
 #if (EVC_BITS >= 7)
-#define	LA(n)	(SINT32)((n/0.75)*(1<<(EVC_BITS - 7)))
+#define	LA(n)	(SINT32)((n/0.75)*(1<<(EVC_BITS - 7)))/2
 #else
-#define	LA(n)	(SINT32)((n/0.75)*(1<<(7 - EVC_BITS)))
+#define	LA(n)	(SINT32)((n/0.75)*(1<<(7 - EVC_BITS)))/2
 #endif
 #define	LP(n)	(SINT32)
        const double lfo_freq[8]			= {3.98, 5.56, 6.02, 6.37, 6.88, 9.63, 48.1, 72.2};	//単位 [Hz]
        		 SINT32 lfo_freq_table[8]	= {0,0,0,0,0,0,0,0};
 	   const SINT32 lfo_pms_table[8]	= {
-				0x00000000,		// 0 [cent]
-				0x0080D56F,		// 3.4 [cent]	table = (1-(2^(n[cent]/1200))) * 2^32
-				0x00FE1ED5,		// 6.7 [cent]
-				0x017BA56C,		//10 [cent]
-				0x02141EA7,		//14 [cent]
-				0x02F97DDC,		//20 [cent]
-				0x05FBD4D5,		//40 [cent]
-				0x0C1B77B6};	//80 [cent]	MUL freq_inc,この値 を実行して、edxの数値を足す。
+				0x00000000/2,		// 0 [cent]
+				0x0080D56F/2,		// 3.4 [cent]	table = (1-(2^(n[cent]/1200))) * 2^32
+				0x00FE1ED5/2,		// 6.7 [cent]
+				0x017BA56C/2,		//10 [cent]
+				0x02141EA7/2,		//14 [cent]
+				0x02F97DDC/2,		//20 [cent]
+				0x05FBD4D5/2,		//40 [cent]
+				0x0C1B77B6/2};	//80 [cent]	MUL freq_inc,この値 を実行して、edxの数値を足す。
        const SINT32 lfo_ams_table[4]	= {LA(0),LA(1.4),LA(5.9),LA(11.8)};	//[dB]
 
 //==============================================================
@@ -176,8 +176,8 @@ void opngen_initialize(UINT rate) {
 	}
 
 	//ハードウェアLFOのfreq用テーブルの作成
-	for (i=0; i<7; i++) {
-		lfo_freq_table[i] = (SINT32)((SIN_ENT / ((OPNA_CLOCK / 72) / lfo_freq[i] )) * (1 << opncfg.ratebit));
+	for (i=0; i<8; i++) {
+		lfo_freq_table[i] = (SINT32)(((double)SIN_ENT / (((double)OPNA_CLOCK / 72) / lfo_freq[i] )) * (double)(1 << (opncfg.ratebit + 16 - SIN_BITS)));
 	}
 	//------------------
 	//◆
@@ -719,7 +719,13 @@ void opngen_setreg(REG8 chbase, UINT reg, REG8 value) {
 	}
 	sound_sync();
 	ch = opnch + chbase + chpos;
-	if (reg < 0xa0) {
+	if (reg == 0x22) {					// LFO ON & Freq
+		if (ch->stereo) {
+			opngen.lfo_enable	= (value & 0x08) >> 3;
+			opngen.lfo_freq_inc	= lfo_freq_table[value & 0x07];
+			opngen.lfo_freq_cnt	= 0;
+		}
+	} else if (reg < 0xa0) {
 		slot = ch->slot + fmslot[(reg >> 2) & 3];
 		switch(reg & 0xf0) {
 			case 0x30:					// DT1 & MUL
@@ -754,10 +760,6 @@ void opngen_setreg(REG8 chbase, UINT reg, REG8 value) {
 				channleupdate(ch);
 				break;
 		}
-	} else if (reg ==0x22) {			// LFO ON & Freq
-		opngen.lfo_enable	= (value & 0x08) >> 3;
-		opngen.lfo_freq_inc	= lfo_freq_table[value & 0x07];
-		opngen.lfo_freq_cnt	= 0;
 	} else {
 		switch(reg & 0xfc) {
 			case 0xa0:					// F-num 1
@@ -820,9 +822,11 @@ void opngen_setreg(REG8 chbase, UINT reg, REG8 value) {
 				break;
 
 			case 0xb4:				//PAN & AMS & PMS
-				ch->pms = lfo_pms_table[ value & 0x07];	
-				ch->ams = lfo_pms_table[(value & 0x30) >> 4];
-				ch->pan = (UINT8)(value & 0xc0);
+				if (ch->stereo) {
+					ch->pms = lfo_pms_table[ value & 0x07];	
+					ch->ams = lfo_ams_table[(value & 0x30) >> 4];
+					ch->pan = (UINT8)(value & 0xc0);
+				}
 				set_algorithm(ch);
 				break;
 		}

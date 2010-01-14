@@ -6,6 +6,7 @@
 ;
 ;		re-maked by S.W.
 ;			2009.11.21	ちょっとだけpipe-lineの最適化
+;			2010. 1.14	ハードウェアＬＦＯのエミュレートに対応
 ;
 ;=======================================================================
 	.586p
@@ -85,7 +86,7 @@ keyfunc			db	4	dup(?)
 kcode			db	4	dup(?)
 pan			db	?
 extop			db	?
-stereo			db	2	dup(?)
+stereo			db	?
 padding2		db	?
 pms			dd	?
 ams			dd	?
@@ -284,17 +285,17 @@ opngen_getpcm	proc	near	stdcall	public	uses ebx esi edi,
 			mov	eax, opngen.lfo_freq_cnt
 			add	eax, opngen.lfo_freq_inc
 			mov	opngen.lfo_freq_cnt, eax
-			mov	cl, opncfg.sinshift[eax]		;(v)	2
+			shr	eax, (FREQ_BITS - SIN_BITS)
+			and	eax, (SIN_ENT - 1)			;(u)	1
+			mov	dl, opncfg.sinshift[eax]		;(v)	2
 			mov	eax, opncfg.sintable[eax*4]		;(u)	1
 		.else
 			xor	eax, eax
-			xor	ecx, ecx
+			xor	edx, edx
 		.endif
 		mov	LFO_Level, eax
-		mov	LFO_LevelSft, cl
+		mov	LFO_LevelSft, dl
 		;-----------------------
-
-		align	16
 
 		assume	edi:ptr slot_t
 
@@ -315,16 +316,19 @@ opngen_getpcm	proc	near	stdcall	public	uses ebx esi edi,
 
 			;slot数だけ繰り返す。
 			.repeat					;	jmp命令になる。
-				push	ecx
 				;Freqency
+				push	ecx
 				mov	eax, [edi].freq_inc		;(v)	1
 				mov	ebx, (ch_t ptr [esi - ch_t_off]).pms
-				mov	cl, LFO_LevelSft
+				mov	ecx, eax
 				imul	ebx, LFO_Level
 				imul	ebx
+				mov	eax, ecx
+				mov	cl, LFO_LevelSft
 				sar	edx, cl
 				add	eax, edx
 				add	[edi].freq_cnt, eax		;(v)	3
+				pop	ecx
 
 				;Envlop
 				mov	eax, [edi].env_cnt		;(u)	1
@@ -336,15 +340,16 @@ PhaseChangeEndPoint:
 				mov	edx, [edi].totallevel			;(v)	1
 				shr	eax, ENV_BITS				;(u)		eax >> ENV_BITS
 				.if	(dword ptr [edi].amon & 01h)
+					push	ecx
 					mov	ebx, (ch_t ptr [esi - ch_t_off]).ams
+					mov	cl, LFO_LevelSft
 					imul	ebx, LFO_Level
 					sar	ebx, cl
 					add	edx, ebx
+					pop	ecx
 				.endif
 				sub	edx, opncfg.envcurve[eax*4]		;(u)	2	(直ぐにeaxを使う為、ペアリング不可)
 				jl	og_calcslot3				;(v)	1	条件ジャンプは(v)限定。
-
-				pop	ecx
 				push	ecx							;(u)	4
 				.if	(cl == 0)						;(u→v)
 					mov	ebx,(ch_t ptr [esi - ch_t_off]).op1fb		;(u)	1	with feedback
@@ -381,8 +386,8 @@ PhaseChangeEndPoint:
 					op_out
 					add	[ebx], eax	;	1
 				.endif
-og_calcslot3:
 				pop	ecx			;(u)	4
+og_calcslot3:
 				rol	ch,1			;(u)	
 				add	edi, sizeof(slot_t)	;	1
 				inc	cl			;	1

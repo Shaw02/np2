@@ -129,8 +129,8 @@ typedef struct {
 	UINT8	extop;				// extendopelator-enable
 	UINT8	stereo;				// stereo-enable
 	UINT8	padding2;			//
-	UINT	pms;				//PMS
-	UINT	ams;				//AMS
+	UINT32	pms;				//PMS
+	UINT32	ams;				//AMS
 } OPNCH;
 
 typedef struct {

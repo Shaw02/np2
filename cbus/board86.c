@@ -37,7 +37,7 @@ static void IOOUTCALL opna_o18a(UINT port, REG8 dat) {
 				rhythm_setreg(&rhythm, addr, dat);
 			}
 		}
-		else if (addr < 0x30) {
+		else if ((addr < 0x30) && (addr > 0x22)) {
 			if (addr == 0x28) {
 				if ((dat & 0x0f) < 3) {
 					opngen_keyon(dat & 0x0f, dat);
